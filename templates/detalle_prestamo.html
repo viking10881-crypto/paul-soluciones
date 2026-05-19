@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle Préstamo | Solucione$ Paul{% endblock %}
+
+{% block content %}
+
+<section class="page-section">
+
+    <div class="page-header">
+
+        <div>
+            <h1>Préstamo #{{ prestamo.id }}</h1>
+
+            <p>
+                Cliente: {{ prestamo.deudor.nombre }}
+            </p>
+        </div>
+
+        <a href="{{ url_for('detalle_deudor', deudor_id=prestamo.deudor.id) }}"
+           class="btn-small">
+            ← Volver
+        </a>
+
+    </div>
+
+    <!-- RESUMEN -->
+
+    <div class="prestamo-resumen">
+
+        <div class="metric-card">
+            <span>Monto inicial</span>
+            <h2>${{ "{:,.0f}".format(prestamo.monto) }}</h2>
+        </div>
+
+        <div class="metric-card">
+            <span>Saldo pendiente</span>
+            <h2>${{ "{:,.0f}".format(prestamo.saldo_capital) }}</h2>
+        </div>
+
+        <div class="metric-card">
+            <span>Interés mensual</span>
+            <h2>{{ prestamo.interes_mensual }}%</h2>
+        </div>
+
+        <div class="metric-card">
+            <span>Cuotas</span>
+            <h2>{{ prestamo.numero_cuotas }}</h2>
+        </div>
+
+    </div>
+
+    <!-- CUOTAS -->
+
+    <div class="section-title">
+        <h2>Cuotas del préstamo</h2>
+    </div>
+
+    <div class="table-card">
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Vencimiento</th>
+                    <th>Capital</th>
+                    <th>Interés</th>
+                    <th>Total</th>
+                    <th>Estado</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+                {% for cuota in cuotas %}
+
+                <tr>
+
+                    <td>{{ cuota.numero }}</td>
+
+                    <td>
+                        {{ cuota.fecha_vencimiento.strftime('%d/%m/%Y') }}
+                    </td>
+
+                    <td>
+                        ${{ "{:,.0f}".format(cuota.capital) }}
+                    </td>
+
+                    <td>
+                        ${{ "{:,.0f}".format(cuota.interes) }}
+                    </td>
+
+                    <td>
+                        ${{ "{:,.0f}".format(cuota.total) }}
+                    </td>
+
+                    <td>
+
+                        <span class="estado estado-{{ cuota.estado }}">
+                            {{ cuota.estado }}
+                        </span>
+
+                    </td>
+
+                </tr>
+
+                <tr>
+
+                    <td colspan="6">
+
+                        <div class="payment-box">
+
+                            <form method="POST"
+                                  action="{{ url_for('pagar_cuota', cuota_id=cuota.id) }}">
+
+                                <div class="payment-grid">
+
+                                    <div class="form-group">
+                                        <label>Tipo de pago</label>
+
+                                        <select name="tipo_pago" required>
+
+                                            <option value="cuota_completa">
+                                                Cuota completa
+                                            </option>
+
+                                            <option value="solo_interes">
+                                                Solo interés
+                                            </option>
+
+                                            <option value="abono_capital">
+                                                Abono capital
+                                            </option>
+
+                                            <option value="abono_parcial">
+                                                Abono parcial
+                                            </option>
+
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Monto</label>
+
+                                        <input type="number"
+                                               step="0.01"
+                                               name="monto"
+                                               placeholder="Valor pagado"
+                                               required>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Nota</label>
+
+                                        <input type="text"
+                                               name="nota"
+                                               placeholder="Observación">
+                                    </div>
+
+                                </div>
+
+                                <button type="submit" class="btn-primary">
+                                    Registrar pago
+                                </button>
+
+                            </form>
+
+                        </div>
+
+                    </td>
+
+                </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+    <!-- HISTORIAL -->
+
+    <div class="section-title historial-title">
+        <h2>Historial de pagos</h2>
+    </div>
+
+    {% if pagos %}
+
+    <div class="payments-history">
+
+        {% for pago in pagos %}
+
+        <div class="payment-history-card">
+
+            <div class="payment-history-top">
+
+                <div>
+                    <span>{{ pago.tipo_pago }}</span>
+
+                    <h3>
+                        ${{ "{:,.0f}".format(pago.monto) }}
+                    </h3>
+                </div>
+
+                <strong>
+                    {{ pago.fecha_pago.strftime('%d/%m/%Y %H:%M') }}
+                </strong>
+
+            </div>
+
+            <div class="payment-history-info">
+
+                <div>
+                    <span>Capital</span>
+
+                    <strong>
+                        ${{ "{:,.0f}".format(pago.capital_pagado) }}
+                    </strong>
+                </div>
+
+                <div>
+                    <span>Interés</span>
+
+                    <strong>
+                        ${{ "{:,.0f}".format(pago.interes_pagado) }}
+                    </strong>
+                </div>
+
+            </div>
+
+            {% if pago.nota %}
+            <p class="payment-note">
+                {{ pago.nota }}
+            </p>
+            {% endif %}
+
+        </div>
+
+        {% endfor %}
+
+    </div>
+
+    {% else %}
+
+    <div class="empty-state">
+        <h2>No hay pagos registrados</h2>
+    </div>
+
+    {% endif %}
+
+</section>
+
+{% endblock %}

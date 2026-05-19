@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | Solucione$ Paul</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+</head>
+<body class="login-body dark-mode">
+
+    <section class="login-page">
+
+        <div class="login-card">
+
+            <div class="login-logo">
+                <img src="{{ url_for('static', filename='img/logo.jpeg') }}" alt="Logo Solucione$ Paul">
+            </div>
+
+            <h1>Solucione$ Paul</h1>
+            <p>Panel administrativo de préstamos</p>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert {{ category }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <form method="POST">
+
+                <div class="form-group">
+                    <label>Usuario</label>
+                    <input type="text" name="usuario" placeholder="Ingresa tu usuario" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" name="password" placeholder="Ingresa tu contraseña" required>
+                </div>
+
+                <button type="submit" class="btn-primary">
+                    Iniciar sesión
+                </button>
+
+            </form>
+
+            <span class="login-footer">
+                Sistema privado de administración
+            </span>
+
+        </div>
+
+    </section>
+
+</body>
+</html>

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Deudores | Solucione$ Paul{% endblock %}
+
+{% block content %}
+
+<section class="page-section">
+
+    <div class="page-header">
+        <div>
+            <h1>Deudores</h1>
+            <p>Listado de clientes registrados</p>
+        </div>
+
+        <a href="{{ url_for('nuevo_deudor') }}" class="btn-action">
+            + Nuevo Deudor
+        </a>
+    </div>
+
+    {% if deudores %}
+
+        <div class="table-card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Cédula</th>
+                        <th>Teléfono</th>
+                        <th>Dirección</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for deudor in deudores %}
+                    <tr>
+                        <td>{{ deudor.nombre }}</td>
+                        <td>{{ deudor.cedula }}</td>
+                        <td>{{ deudor.telefono }}</td>
+                        <td>{{ deudor.direccion or "Sin dirección" }}</td>
+                        <td>
+                            <a href="{{ url_for('detalle_deudor', deudor_id=deudor.id) }}" class="btn-small">
+                                Ver detalle
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+    {% else %}
+
+        <div class="empty-state">
+            <h2>No hay deudores registrados</h2>
+            <p>Comienza agregando tu primer cliente.</p>
+
+            <a href="{{ url_for('nuevo_deudor') }}" class="btn-action">
+                Registrar deudor
+            </a>
+        </div>
+
+    {% endif %}
+
+</section>
+
+{% endblock %}  

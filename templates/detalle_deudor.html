@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle Deudor | Solucione$ Paul{% endblock %}
+
+{% block content %}
+
+<section class="page-section">
+
+    <div class="page-header">
+
+        <div>
+            <h1>{{ deudor.nombre }}</h1>
+            <p>Información y préstamos del cliente</p>
+        </div>
+
+        <div class="header-actions">
+
+            <a href="{{ url_for('nuevo_prestamo', deudor_id=deudor.id) }}" class="btn-action">
+                + Nuevo Préstamo
+            </a>
+
+            <a href="{{ url_for('deudores') }}" class="btn-small">
+                ← Volver
+            </a>
+
+        </div>
+
+    </div>
+
+    <!-- DATOS -->
+
+    <div class="detail-grid">
+
+        <div class="detail-card">
+
+            <h3>Datos del deudor</h3>
+
+            <div class="info-list">
+
+                <div class="info-item">
+                    <span>Cédula</span>
+                    <strong>{{ deudor.cedula }}</strong>
+                </div>
+
+                <div class="info-item">
+                    <span>Teléfono</span>
+                    <strong>{{ deudor.telefono }}</strong>
+                </div>
+
+                <div class="info-item">
+                    <span>Correo</span>
+                    <strong>{{ deudor.correo or "No registrado" }}</strong>
+                </div>
+
+                <div class="info-item">
+                    <span>Dirección</span>
+                    <strong>{{ deudor.direccion or "No registrada" }}</strong>
+                </div>
+
+                <div class="info-item">
+                    <span>Referencia</span>
+                    <strong>{{ deudor.referencia or "No registrada" }}</strong>
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- PRESTAMOS -->
+
+    <div class="prestamos-section">
+
+        <div class="section-title">
+            <h2>Préstamos</h2>
+        </div>
+
+        {% if deudor.prestamos %}
+
+            <div class="prestamos-grid">
+
+                {% for prestamo in deudor.prestamos %}
+
+                <div class="prestamo-card">
+
+                    <div class="prestamo-top">
+
+                        <div>
+                            <span class="prestamo-label">
+                                Préstamo #{{ prestamo.id }}
+                            </span>
+
+                            <h3>
+                                ${{ "{:,.0f}".format(prestamo.monto) }}
+                            </h3>
+                        </div>
+
+                        <span class="estado estado-{{ prestamo.estado }}">
+                            {{ prestamo.estado }}
+                        </span>
+
+                    </div>
+
+                    <div class="prestamo-info">
+
+                        <div>
+                            <span>Interés</span>
+                            <strong>{{ prestamo.interes_mensual }}%</strong>
+                        </div>
+
+                        <div>
+                            <span>Cuotas</span>
+                            <strong>{{ prestamo.numero_cuotas }}</strong>
+                        </div>
+
+                        <div>
+                            <span>Saldo</span>
+                            <strong>
+                                ${{ "{:,.0f}".format(prestamo.saldo_capital) }}
+                            </strong>
+                        </div>
+
+                    </div>
+
+                    <div class="prestamo-actions">
+
+                       <a href="{{ url_for('detalle_prestamo', prestamo_id=prestamo.id) }}"
+                            class="btn-small">
+                                Ver cuotas
+                            </a>
+                    </div>
+
+                </div>
+
+                {% endfor %}
+
+            </div>
+
+        {% else %}
+
+            <div class="empty-state">
+                <h2>Este cliente no tiene préstamos</h2>
+
+                <a href="{{ url_for('nuevo_prestamo', deudor_id=deudor.id) }}"
+                   class="btn-action">
+                    Crear préstamo
+                </a>
+            </div>
+
+        {% endif %}
+
+    </div>
+
+</section>
+
+{% endblock %}

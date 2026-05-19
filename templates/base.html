@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Solucione$ Paul{% endblock %}</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+</head>
+<body class="dark-mode">
+
+    <div class="app-container">
+
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+
+            <div class="logo-area">
+                <img src="{{ url_for('static', filename='img/logo.jpeg') }}" alt="Logo">
+                <h2>Solucione$ Paul</h2>
+            </div>
+
+            <nav class="menu">
+
+                <a href="{{ url_for('dashboard') }}" data-label="Dashboard">
+                    📊 Dashboard
+                </a>
+
+                <a href="{{ url_for('deudores') }}" data-label="Deudores">
+                    👥 Deudores
+                </a>
+
+                <a href="{{ url_for('nuevo_deudor') }}" data-label="Nuevo Deudor">
+                    ➕ Nuevo Deudor
+                </a>
+
+                <a href="{{ url_for('logout') }}" data-label="Cerrar sesión">
+                    🚪 Cerrar sesión
+                </a>
+
+            </nav>
+
+        </aside>
+
+        <!-- Overlay para cerrar el drawer en móvil -->
+        <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+        <!-- MAIN -->
+        <main class="main-content">
+
+            <header class="topbar">
+
+                <!-- Botón hamburger (solo visible en móvil) -->
+                <button id="hamburger" aria-label="Abrir menú">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+
+                <button id="theme-toggle">
+                    🌙 / ☀️
+                </button>
+
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert {{ category }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}
+            {% endblock %}
+
+        </main>
+
+    </div>
+
+<script>
+
+    /* ---- TEMA ---- */
+    const body = document.body;
+    const toggle = document.getElementById("theme-toggle");
+
+    if (localStorage.getItem("theme") === "light") {
+        body.classList.remove("dark-mode");
+        body.classList.add("light-mode");
+    }
+
+    toggle.addEventListener("click", () => {
+        body.classList.toggle("light-mode");
+        body.classList.toggle("dark-mode");
+
+        localStorage.setItem("theme", body.classList.contains("light-mode") ? "light" : "dark");
+
+        window.dispatchEvent(new Event('themeChanged'));
+    });
+
+    /* ---- HAMBURGER / DRAWER ---- */
+    const hamburger = document.getElementById("hamburger");
+    const sidebar   = document.querySelector(".sidebar");
+    const overlay   = document.getElementById("sidebar-overlay");
+
+    function openDrawer() {
+        sidebar.classList.add("open");
+        overlay.classList.add("open");
+        document.body.style.overflow = "hidden"; // evita scroll del fondo
+    }
+
+    function closeDrawer() {
+        sidebar.classList.remove("open");
+        overlay.classList.remove("open");
+        document.body.style.overflow = "";
+    }
+
+    hamburger.addEventListener("click", () => {
+        sidebar.classList.contains("open") ? closeDrawer() : openDrawer();
+    });
+
+    overlay.addEventListener("click", closeDrawer);
+
+    // Cierra el drawer al navegar (útil en SPAs o si el usuario toca un link)
+    sidebar.querySelectorAll("a").forEach(link => {
+        link.addEventListener("click", closeDrawer);
+    });
+
+    // Cierra el drawer si la ventana se amplía a tablet/desktop
+    window.addEventListener("resize", () => {
+        if (window.innerWidth > 600) {
+            closeDrawer();
+        }
+    });
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}Nuevo Préstamo | Solucione$ Paul{% endblock %}
+
+{% block content %}
+
+<section class="page-section">
+
+    <div class="page-header">
+        <div>
+            <h1>Nuevo Préstamo</h1>
+            <p>Crear deuda para {{ deudor.nombre }} al 7% mensual</p>
+        </div>
+
+        <a href="{{ url_for('detalle_deudor', deudor_id=deudor.id) }}" class="btn-small">
+            ← Volver
+        </a>
+    </div>
+
+    <div class="form-card">
+
+        <form method="POST">
+
+            <div class="form-grid">
+
+                <div class="form-group">
+                    <label>Monto prestado</label>
+                    <input type="number" name="monto" id="monto" placeholder="Ej: 1000000" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Número de cuotas</label>
+                    <input type="number" name="numero_cuotas" id="numero_cuotas" placeholder="Ej: 5" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Día de pago mensual</label>
+                    <input type="number" name="dia_pago" min="1" max="31" placeholder="Ej: 15" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Interés mensual</label>
+                    <input type="text" value="7% fijo mensual" disabled>
+                </div>
+
+            </div>
+
+            <div class="simulator-card">
+                <h3>Simulación automática</h3>
+
+                <div class="simulator-grid">
+                    <div>
+                        <span>Interés mensual</span>
+                        <strong id="interes_preview">$0</strong>
+                    </div>
+
+                    <div>
+                        <span>Capital por cuota</span>
+                        <strong id="capital_preview">$0</strong>
+                    </div>
+
+                    <div>
+                        <span>Cuota mensual aprox.</span>
+                        <strong id="cuota_preview">$0</strong>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-primary">
+                Crear Préstamo
+            </button>
+
+        </form>
+
+    </div>
+
+</section>
+
+<script>
+const montoInput = document.getElementById("monto");
+const cuotasInput = document.getElementById("numero_cuotas");
+
+const interesPreview = document.getElementById("interes_preview");
+const capitalPreview = document.getElementById("capital_preview");
+const cuotaPreview = document.getElementById("cuota_preview");
+
+function formatoCOP(valor) {
+    return new Intl.NumberFormat("es-CO", {
+        style: "currency",
+        currency: "COP",
+        maximumFractionDigits: 0
+    }).format(valor || 0);
+}
+
+function calcularPreview() {
+    const monto = parseFloat(montoInput.value) || 0;
+    const cuotas = parseInt(cuotasInput.value) || 0;
+
+    const interes = monto * 0.07;
+    const capital = cuotas > 0 ? monto / cuotas : 0;
+    const cuota = capital + interes;
+
+    interesPreview.textContent = formatoCOP(interes);
+    capitalPreview.textContent = formatoCOP(capital);
+    cuotaPreview.textContent = formatoCOP(cuota);
+}
+
+montoInput.addEventListener("input", calcularPreview);
+cuotasInput.addEventListener("input", calcularPreview);
+</script>
+
+{% endblock %}

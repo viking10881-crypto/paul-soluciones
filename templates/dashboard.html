@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | Solucione$ Paul{% endblock %}
+
+{% block content %}
+
+<section class="dashboard">
+
+    <div class="dashboard-header">
+        <h1>Dashboard Financiero</h1>
+        <p>Control total de préstamos y deudores</p>
+    </div>
+
+    <div class="cards-grid">
+
+        <div class="metric-card">
+            <span>👥 Deudores</span>
+            <h2>{{ deudores }}</h2>
+        </div>
+
+        <div class="metric-card">
+            <span>💰 Total Prestado</span>
+            <h2>${{ "{:,.0f}".format(total_prestado) }}</h2>
+        </div>
+
+        <div class="metric-card">
+            <span>📈 Intereses Ganados</span>
+            <h2>${{ "{:,.0f}".format(intereses_ganados) }}</h2>
+        </div>
+
+        <div class="metric-card">
+            <span>🏦 Capital Pendiente</span>
+            <h2>${{ "{:,.0f}".format(capital_pendiente) }}</h2>
+        </div>
+
+        <div class="metric-card">
+            <span>✅ Pagado</span>
+            <h2>${{ "{:,.0f}".format(total_pagado) }}</h2>
+        </div>
+
+        <div class="metric-card">
+            <span>📌 Préstamos Activos</span>
+            <h2>{{ prestamos_activos }}</h2>
+        </div>
+
+    </div>
+
+    <div class="charts-grid">
+
+        <div class="chart-card">
+            <h3>Estado de préstamos</h3>
+            <canvas id="estadoPrestamos"></canvas>
+        </div>
+
+        <div class="chart-card">
+            <h3>Montos clave</h3>
+            <canvas id="resumenMontos"></canvas>
+        </div>
+
+    </div>
+
+</section>
+
+<script>
+
+const estadoCtx = document.getElementById('estadoPrestamos');
+const resumenCtx = document.getElementById('resumenMontos');
+
+function getChartTheme() {
+    const storageTheme = localStorage.getItem('theme');
+    const isLight = storageTheme === 'light' || (!storageTheme && document.body.classList.contains('light-mode'));
+    return {
+        textColor: isLight ? '#0f172a' : '#ffffff',
+        gridColor: isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255,255,255,0.08)'
+    };
+}
+
+const initialTheme = getChartTheme();
+
+const doughnutChart = new Chart(estadoCtx, {
+    type: 'doughnut',
+    data: {
+        labels: ['Activos', 'Pagados', 'Atrasados'],
+        datasets: [{
+            data: [
+                {{ prestamos_activos }},
+                {{ prestamos_pagados }},
+                {{ prestamos_atrasados }}
+            ],
+            backgroundColor: [
+                '#2563eb',
+                '#10b981',
+                '#ef4444'
+            ],
+            borderWidth: 0
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                labels: {
+                    color: initialTheme.textColor,
+                    font: {
+                        size: 14
+                    }
+                }
+            }
+        }
+    }
+});
+
+const barChart = new Chart(resumenCtx, {
+    type: 'bar',
+    data: {
+        labels: ['Total Prestado', 'Capital Pendiente', 'Total Pagado'],
+        datasets: [{
+            label: 'Pesos',
+            data: [
+                {{ total_prestado }},
+                {{ capital_pendiente }},
+                {{ total_pagado }}
+            ],
+            backgroundColor: ['#0ea5e9', '#14b8a6', '#f59e0b'],
+            borderRadius: 12,
+            maxBarThickness: 40
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            x: {
+                ticks: {
+                    color: initialTheme.textColor,
+                    font: {
+                        size: 12
+                    }
+                },
+                grid: {
+                    display: false
+                }
+            },
+            y: {
+                ticks: {
+                    color: initialTheme.textColor,
+                    font: {
+                        size: 12
+                    }
+                },
+                grid: {
+                    color: initialTheme.gridColor
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: false
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        return '$' + context.parsed.y.toLocaleString('es-ES');
+                    }
+                }
+            }
+        }
+    }
+});
+
+function refreshChartTheme() {
+    const theme = getChartTheme();
+
+    doughnutChart.options.plugins.legend.labels.color = theme.textColor;
+    doughnutChart.update();
+
+    barChart.options.scales.x.ticks.color = theme.textColor;
+    barChart.options.scales.y.ticks.color = theme.textColor;
+    barChart.options.scales.y.grid.color = theme.gridColor;
+    barChart.update();
+}
+
+window.addEventListener('themeChanged', refreshChartTheme);
+
+</script>
+
+{% endblock %}
