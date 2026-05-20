@@ -9,7 +9,7 @@
     <div class="page-header">
         <div>
             <h1>Nuevo Préstamo</h1>
-            <p>Crear deuda para {{ deudor.nombre }} al 7% mensual</p>
+            <p>Crear deuda para {{ deudor.nombre }}</p>
         </div>
 
         <a href="{{ url_for('detalle_deudor', deudor_id=deudor.id) }}" class="btn-small">
@@ -39,8 +39,18 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Interés mensual</label>
-                    <input type="text" value="7% fijo mensual" disabled>
+                    <label>Interés mensual (%)</label>
+                    <input
+                        type="number"
+                        name="interes_mensual"
+                        id="interes_mensual"
+                        placeholder="Ej: 7"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value="7"
+                        required
+                    >
                 </div>
 
             </div>
@@ -77,12 +87,13 @@
 </section>
 
 <script>
-const montoInput = document.getElementById("monto");
-const cuotasInput = document.getElementById("numero_cuotas");
+const montoInput    = document.getElementById("monto");
+const cuotasInput   = document.getElementById("numero_cuotas");
+const interesInput  = document.getElementById("interes_mensual");
 
 const interesPreview = document.getElementById("interes_preview");
 const capitalPreview = document.getElementById("capital_preview");
-const cuotaPreview = document.getElementById("cuota_preview");
+const cuotaPreview   = document.getElementById("cuota_preview");
 
 function formatoCOP(valor) {
     return new Intl.NumberFormat("es-CO", {
@@ -93,20 +104,25 @@ function formatoCOP(valor) {
 }
 
 function calcularPreview() {
-    const monto = parseFloat(montoInput.value) || 0;
-    const cuotas = parseInt(cuotasInput.value) || 0;
+    const monto  = parseFloat(montoInput.value)   || 0;
+    const cuotas = parseInt(cuotasInput.value)    || 0;
+    const tasa   = parseFloat(interesInput.value) || 0;
 
-    const interes = monto * 0.07;
+    const interes = monto * (tasa / 100);
     const capital = cuotas > 0 ? monto / cuotas : 0;
-    const cuota = capital + interes;
+    const cuota   = capital + interes;
 
     interesPreview.textContent = formatoCOP(interes);
     capitalPreview.textContent = formatoCOP(capital);
-    cuotaPreview.textContent = formatoCOP(cuota);
+    cuotaPreview.textContent   = formatoCOP(cuota);
 }
 
 montoInput.addEventListener("input", calcularPreview);
 cuotasInput.addEventListener("input", calcularPreview);
+interesInput.addEventListener("input", calcularPreview);
+
+// calcula al cargar con el valor por defecto
+calcularPreview();
 </script>
 
 {% endblock %}

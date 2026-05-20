@@ -191,7 +191,7 @@ def nuevo_prestamo(deudor_id):
         monto = float(request.form.get("monto"))
         numero_cuotas = int(request.form.get("numero_cuotas"))
         dia_pago = int(request.form.get("dia_pago"))
-        interes_mensual = 7.0
+        interes_mensual = float(request.form.get("interes_mensual", 7.0))
 
         prestamo = Prestamo(
             deudor_id=deudor.id,
