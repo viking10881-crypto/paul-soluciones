@@ -8,96 +8,343 @@ body {
     font-family: Arial, Helvetica, sans-serif;
 }
 
+/* =====================
+   MODO OSCURO (base)
+   ===================== */
+
 .dark-mode {
     background: #06080d;
     color: #ffffff;
 }
+
+/* =====================
+   MODO CLARO — overrides completos
+   ===================== */
 
 .light-mode {
     background: #f4f7fb;
     color: #101828;
 }
 
+/* Contenedores principales */
 .light-mode .app-container,
-.light-mode .main-content,
-.light-mode .dashboard-header p,
-.light-mode .metric-card,
-.light-mode .chart-card,
-.light-mode .table-card,
-.light-mode .form-card,
-.light-mode .detail-card,
-.light-mode .empty-state,
-.light-mode .info-item {
-    background: #ffffff;
+.light-mode .main-content {
+    background: #f4f7fb;
     color: #0f172a;
-    border-color: rgba(15, 23, 42, 0.08);
 }
 
+/* Sidebar */
 .light-mode .sidebar {
     background: #eef2ff;
     border-right: 1px solid rgba(99, 102, 241, 0.16);
     box-shadow: 2px 0 18px rgba(99, 102, 241, 0.12);
 }
 
-.light-mode .logo-area h2,
-.light-mode .menu a,
-.light-mode .topbar button,
-.light-mode .metric-card span,
-.light-mode .metric-card h2,
-.light-mode .chart-card h3,
-.light-mode .table-card th,
-.light-mode .table-card td,
-.light-mode .page-header h1,
-.light-mode .page-header p,
-.light-mode .info-item span {
+.light-mode .logo-area h2 {
     color: #0f172a;
-}
-
-.light-mode .metric-card,
-.light-mode .chart-card,
-.light-mode .table-card,
-.light-mode .form-card,
-.light-mode .detail-card,
-.light-mode .empty-state,
-.light-mode .info-item {
-    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
 }
 
 .light-mode .menu a {
     background: rgba(15, 23, 42, 0.06);
     color: #0f172a;
+    text-shadow: none;
 }
 
 .light-mode .menu a:hover {
     background: linear-gradient(135deg, #c7d2fe, #bae6fd);
+    color: #1e3a8a;
 }
 
-.light-mode .btn-action,
-.light-mode .btn-small,
+/* Topbar */
+.light-mode .topbar button,
 .light-mode #theme-toggle {
     background: linear-gradient(135deg, #2563eb, #0ea5e9);
     color: white;
 }
 
-.light-mode .alert.error {
-    background: rgba(239, 68, 68, 0.12);
-    color: #991b1b;
-    border-color: rgba(239, 68, 68, 0.35);
-}
-
-.light-mode .alert.success {
-    background: rgba(34, 197, 94, 0.12);
-    color: #166534;
-    border-color: rgba(34, 197, 94, 0.35);
+.light-mode #hamburger {
+    background: rgba(37, 99, 235, 0.12);
+    border-color: rgba(37, 99, 235, 0.35);
 }
 
 .light-mode #hamburger span {
     background: #2563eb;
 }
 
-.light-mode #hamburger {
-    background: rgba(37, 99, 235, 0.12);
-    border-color: rgba(37, 99, 235, 0.35);
+/* Cabeceras de página */
+.light-mode .dashboard-header p,
+.light-mode .page-header p {
+    color: #475569;
+}
+
+.light-mode .page-header h1,
+.light-mode .dashboard-header h1 {
+    color: #0f172a;
+}
+
+/* Tarjetas métricas */
+.light-mode .metric-card {
+    background: #ffffff;
+    color: #0f172a;
+    border-color: rgba(15, 23, 42, 0.08);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .metric-card span {
+    color: #64748b;
+}
+
+.light-mode .metric-card h2 {
+    color: #0f172a;
+}
+
+/* Gráficas */
+.light-mode .chart-card {
+    background: #ffffff;
+    color: #0f172a;
+    border-color: rgba(15, 23, 42, 0.08);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .chart-card h3 {
+    color: #0f172a;
+}
+
+/* Tabla */
+.light-mode .table-card {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.08);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.07);
+}
+
+.light-mode table thead {
+    color: #2563eb;
+}
+
+.light-mode table th {
+    color: #2563eb;
+    border-bottom-color: rgba(15, 23, 42, 0.1);
+}
+
+.light-mode table td {
+    color: #1e293b;
+    border-bottom-color: rgba(15, 23, 42, 0.07);
+}
+
+/* Formularios */
+.light-mode .form-card {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.08);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .form-group label {
+    color: #334155;
+}
+
+.light-mode .form-group input,
+.light-mode .form-group textarea,
+.light-mode .form-group select {
+    background: #f8fafc;
+    color: #0f172a;
+    border-color: rgba(15, 23, 42, 0.18);
+}
+
+.light-mode .form-group input:focus,
+.light-mode .form-group textarea:focus,
+.light-mode .form-group select:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.light-mode .form-group input::placeholder,
+.light-mode .form-group textarea::placeholder {
+    color: #94a3b8;
+}
+
+/* Botones */
+.light-mode .btn-action {
+    background: linear-gradient(135deg, #2563eb, #0ea5e9);
+    color: white;
+}
+
+.light-mode .btn-small {
+    background: rgba(37, 99, 235, 0.1);
+    border-color: rgba(37, 99, 235, 0.3);
+    color: #2563eb;
+}
+
+.light-mode .btn-small:hover {
+    background: rgba(37, 99, 235, 0.18);
+}
+
+/* Estado vacío */
+.light-mode .empty-state {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.08);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .empty-state h2 {
+    color: #0f172a;
+}
+
+.light-mode .empty-state p {
+    color: #64748b;
+}
+
+/* Detalle deudor */
+.light-mode .detail-card {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.08);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .detail-card h3 {
+    color: #0f172a;
+}
+
+.light-mode .info-item {
+    background: #f1f5f9;
+    border: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .info-item span {
+    color: #64748b;
+}
+
+.light-mode .info-item p,
+.light-mode .info-item strong,
+.light-mode .info-item b {
+    color: #0f172a;
+}
+
+/* Préstamos */
+.light-mode .prestamo-card {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.08);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .prestamo-label {
+    color: #64748b;
+}
+
+.light-mode .prestamo-top h3 {
+    color: #0f172a;
+}
+
+.light-mode .prestamo-info div {
+    background: #f1f5f9;
+    border: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .prestamo-info span {
+    color: #64748b;
+}
+
+.light-mode .prestamo-info p,
+.light-mode .prestamo-info strong,
+.light-mode .prestamo-info b {
+    color: #0f172a;
+}
+
+/* Simulador */
+.light-mode .simulator-card {
+    background: rgba(37, 99, 235, 0.06);
+    border-color: rgba(37, 99, 235, 0.22);
+}
+
+.light-mode .simulator-card h3 {
+    color: #1e40af;
+}
+
+.light-mode .simulator-grid div {
+    background: #f0f4ff;
+    border: 1px solid rgba(37, 99, 235, 0.12);
+}
+
+.light-mode .simulator-grid span {
+    color: #64748b;
+}
+
+.light-mode .simulator-grid strong {
+    color: #1e3a8a;
+}
+
+/* Resumen préstamo */
+.light-mode .payment-box {
+    background: #f1f5f9;
+    border: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .payment-box span {
+    color: #64748b;
+}
+
+.light-mode .payment-box p,
+.light-mode .payment-box strong,
+.light-mode .payment-box b {
+    color: #0f172a;
+}
+
+/* Historial de pagos */
+.light-mode .payment-history-card {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.08);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .payment-history-top span {
+    color: #64748b;
+}
+
+.light-mode .payment-history-top h3 {
+    color: #0f172a;
+}
+
+.light-mode .payment-history-info div {
+    background: #f1f5f9;
+    border: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.light-mode .payment-history-info span {
+    color: #64748b;
+}
+
+.light-mode .payment-history-info p,
+.light-mode .payment-history-info strong,
+.light-mode .payment-history-info b {
+    color: #0f172a;
+}
+
+.light-mode .payment-note {
+    color: #475569;
+}
+
+/* section-title */
+.light-mode .section-title {
+    color: #0f172a;
+}
+
+/* Alertas */
+.light-mode .alert.error {
+    background: rgba(239, 68, 68, 0.1);
+    color: #991b1b;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.light-mode .alert.success {
+    background: rgba(34, 197, 94, 0.1);
+    color: #166534;
+    border-color: rgba(34, 197, 94, 0.3);
+}
+
+/* Leyenda de estado */
+.light-mode .estado-leyenda {
+    background: rgba(15, 23, 42, 0.04);
+    border-color: rgba(15, 23, 42, 0.08);
+    color: #475569;
 }
 
 /* =====================
@@ -107,8 +354,8 @@ body {
 .login-body {
     min-height: 100vh;
     background:
-    radial-gradient(circle at top, rgba(37,99,235,0.15), transparent 35%),
-    linear-gradient(to bottom, #02040a, #050816 60%, #02040a);
+        radial-gradient(circle at top, rgba(37,99,235,0.15), transparent 35%),
+        linear-gradient(to bottom, #02040a, #050816 60%, #02040a);
 }
 
 .login-page {
@@ -337,12 +584,10 @@ body {
     font-size: 14px;
 }
 
-/* Hamburger — oculto por defecto en desktop */
 #hamburger {
     display: none;
 }
 
-/* Overlay del drawer móvil */
 .sidebar-overlay {
     display: none;
     position: fixed;
@@ -823,12 +1068,6 @@ textarea {
     gap: 6px;
 }
 
-.light-mode .estado-leyenda {
-    background: rgba(15, 23, 42, 0.04);
-    border-color: rgba(15, 23, 42, 0.08);
-    color: #475569;
-}
-
 /* =====================
    RESPONSIVE
    ===================== */
@@ -860,12 +1099,14 @@ textarea {
         padding: 12px 0;
         font-size: 22px;
         position: relative;
-        /* oculta el texto, mantiene el emoji visible */
         color: transparent;
         text-shadow: 0 0 0 #fff;
     }
 
-    /* tooltip al hacer hover */
+    .light-mode .menu a {
+        text-shadow: 0 0 0 #0f172a;
+    }
+
     .menu a::after {
         content: attr(data-label);
         position: absolute;
@@ -885,6 +1126,12 @@ textarea {
         border: 1px solid rgba(14,165,233,0.3);
     }
 
+    .light-mode .menu a::after {
+        background: #dbeafe;
+        color: #1e3a8a;
+        border-color: rgba(37, 99, 235, 0.3);
+    }
+
     .menu a:hover::after {
         opacity: 1;
     }
@@ -902,7 +1149,6 @@ textarea {
         flex-direction: column;
     }
 
-    /* sidebar se convierte en drawer lateral */
     .sidebar {
         position: fixed;
         top: 0;
@@ -921,7 +1167,6 @@ textarea {
         transform: translateX(0);
     }
 
-    /* restaura el sidebar a su estado normal dentro del drawer */
     .sidebar .logo-area {
         margin-bottom: 30px;
     }
@@ -945,12 +1190,15 @@ textarea {
         gap: 10px;
     }
 
-    /* oculta los tooltips en móvil */
+    .light-mode .sidebar .menu a {
+        color: #0f172a;
+        text-shadow: none;
+    }
+
     .sidebar .menu a::after {
         display: none;
     }
 
-    /* botón hamburger visible */
     #hamburger {
         display: flex;
         flex-direction: column;
@@ -981,7 +1229,6 @@ textarea {
         width: 100%;
     }
 
-    /* layouts internos */
     .page-header {
         flex-direction: column;
         align-items: flex-start;
@@ -1022,7 +1269,6 @@ textarea {
 
 }
 
-/* oculta overlay y hamburger en desktop/tablet */
 @media (min-width: 601px) {
     #hamburger {
         display: none !important;
