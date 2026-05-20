@@ -789,6 +789,47 @@ textarea {
 }
 
 /* =====================
+   INDICADOR ESTADO DEUDOR
+   ===================== */
+
+.estado-dot {
+    font-size: 20px;
+    line-height: 1;
+    cursor: default;
+    display: inline-block;
+}
+
+.dot-verde    { color: #22c55e; }
+.dot-amarillo { color: #f59e0b; }
+.dot-rojo     { color: #ef4444; }
+
+.estado-leyenda {
+    display: flex;
+    gap: 22px;
+    align-items: center;
+    margin-top: 16px;
+    padding: 14px 20px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    font-size: 13px;
+    color: #94a3b8;
+    flex-wrap: wrap;
+}
+
+.estado-leyenda span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.light-mode .estado-leyenda {
+    background: rgba(15, 23, 42, 0.04);
+    border-color: rgba(15, 23, 42, 0.08);
+    color: #475569;
+}
+
+/* =====================
    RESPONSIVE
    ===================== */
 

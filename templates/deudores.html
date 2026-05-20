@@ -23,6 +23,7 @@
             <table>
                 <thead>
                     <tr>
+                        <th>Estado</th>
                         <th>Nombre</th>
                         <th>Cédula</th>
                         <th>Teléfono</th>
@@ -33,7 +34,20 @@
 
                 <tbody>
                     {% for deudor in deudores %}
+
+                    {% set tiene_atrasado   = deudor.prestamos | selectattr("estado", "equalto", "atrasado") | list %}
+                    {% set tiene_activo     = deudor.prestamos | selectattr("estado", "equalto", "activo")   | list %}
+
                     <tr>
+                        <td>
+                            {% if tiene_atrasado %}
+                                <span class="estado-dot dot-rojo" title="Tiene cuotas atrasadas">●</span>
+                            {% elif tiene_activo %}
+                                <span class="estado-dot dot-amarillo" title="Préstamos activos al día">●</span>
+                            {% else %}
+                                <span class="estado-dot dot-verde" title="Paz y salvo">●</span>
+                            {% endif %}
+                        </td>
                         <td>{{ deudor.nombre }}</td>
                         <td>{{ deudor.cedula }}</td>
                         <td>{{ deudor.telefono }}</td>
@@ -44,9 +58,17 @@
                             </a>
                         </td>
                     </tr>
+
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+
+        <!-- Leyenda -->
+        <div class="estado-leyenda">
+            <span><span class="estado-dot dot-rojo">●</span> Cuotas atrasadas</span>
+            <span><span class="estado-dot dot-amarillo">●</span> Activo al día</span>
+            <span><span class="estado-dot dot-verde">●</span> Paz y salvo</span>
         </div>
 
     {% else %}
@@ -64,4 +86,4 @@
 
 </section>
 
-{% endblock %}  
+{% endblock %}
