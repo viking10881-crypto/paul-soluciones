@@ -1,5 +1,6 @@
 import os
 from datetime import date
+from calendar import monthrange
 from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -302,6 +303,32 @@ def pagar_cuota(cuota_id):
         cuota.pagado_interes += interes_pagado
         cuota.estado = "solo_interes"
 
+        # Helper para avanzar meses respetando días válidos
+        def avanzar_mes(fecha, meses=1):
+            total_meses = fecha.month - 1 + meses
+            year = fecha.year + total_meses // 12
+            month = total_meses % 12 + 1
+            day = fecha.day
+
+            last_day = monthrange(year, month)[1]
+            if day > last_day:
+                day = last_day
+
+            return date(year, month, day)
+
+        # Obtener las cuotas restantes ordenadas por número
+        cuotas_restantes = Cuota.query.filter(
+            Cuota.prestamo_id == prestamo.id,
+            Cuota.numero >= cuota.numero
+        ).order_by(Cuota.numero.asc()).all()
+
+        # La nueva fecha de la primera cuota será la actual + 1 mes
+        nueva = avanzar_mes(cuota.fecha_vencimiento, 1)
+
+        for c in cuotas_restantes:
+            c.fecha_vencimiento = nueva
+            nueva = avanzar_mes(nueva, 1)
+
     elif tipo_pago == "abono_capital":
         capital_pagado = monto
         prestamo.saldo_capital -= capital_pagado
@@ -363,6 +390,87 @@ def detalle_prestamo(prestamo_id):
         cuotas=cuotas,
         pagos=pagos
     )
+
+
+@app.route("/prestamo/editar/<int:prestamo_id>", methods=["GET", "POST"])
+@login_required
+def editar_prestamo(prestamo_id):
+    prestamo = Prestamo.query.get_or_404(prestamo_id)
+
+    if request.method == "POST":
+        monto = float(request.form.get("monto"))
+        numero_cuotas = int(request.form.get("numero_cuotas"))
+        dia_pago = int(request.form.get("dia_pago"))
+        interes_mensual = float(request.form.get("interes_mensual", prestamo.interes_mensual))
+
+        pagos_existentes = Pago.query.filter_by(prestamo_id=prestamo.id).count()
+
+        # Si hay pagos, no permitimos cambiar monto o número de cuotas
+        if pagos_existentes > 0 and (monto != prestamo.monto or numero_cuotas != prestamo.numero_cuotas):
+            flash("No se puede cambiar monto o número de cuotas porque ya existen pagos registrados.", "error")
+            return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
+
+        # Actualizar campos básicos
+        prestamo.interes_mensual = interes_mensual
+        prestamo.dia_pago = dia_pago
+
+        if pagos_existentes == 0 and (monto != prestamo.monto or numero_cuotas != prestamo.numero_cuotas):
+            # Recalcular cuotas si no hay pagos
+            prestamo.monto = monto
+            prestamo.numero_cuotas = numero_cuotas
+            prestamo.saldo_capital = monto
+
+            # eliminar cuotas existentes
+            Cuota.query.filter_by(prestamo_id=prestamo.id).delete()
+
+            # crear nuevas cuotas
+            capital_cuota = monto / numero_cuotas
+            interes_cuota = monto * (interes_mensual / 100)
+            total_cuota = capital_cuota + interes_cuota
+
+            hoy = date.today()
+
+            for i in range(1, numero_cuotas + 1):
+                mes = hoy.month + i
+                year = hoy.year + (mes - 1) // 12
+                month = ((mes - 1) % 12) + 1
+
+                try:
+                    fecha_vencimiento = date(year, month, dia_pago)
+                except ValueError:
+                    fecha_vencimiento = date(year, month, 28)
+
+                cuota = Cuota(
+                    prestamo_id=prestamo.id,
+                    numero=i,
+                    fecha_vencimiento=fecha_vencimiento,
+                    capital=capital_cuota,
+                    interes=interes_cuota,
+                    total=total_cuota,
+                    estado="pendiente"
+                )
+
+                db.session.add(cuota)
+
+        db.session.commit()
+
+        flash("Préstamo actualizado correctamente", "success")
+        return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
+
+    return render_template("nuevo_prestamo.html", deudor=prestamo.deudor, prestamo=prestamo)
+
+
+@app.route("/prestamo/eliminar/<int:prestamo_id>", methods=["POST"])
+@login_required
+def eliminar_prestamo(prestamo_id):
+    prestamo = Prestamo.query.get_or_404(prestamo_id)
+    deudor_id = prestamo.deudor_id
+
+    db.session.delete(prestamo)
+    db.session.commit()
+
+    flash("Préstamo eliminado correctamente", "success")
+    return redirect(url_for("detalle_deudor", deudor_id=deudor_id))
 
 
 if __name__ == "__main__":

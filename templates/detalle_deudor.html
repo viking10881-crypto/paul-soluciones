@@ -122,13 +122,21 @@
                         </div>
 
                     </div>
-
+                                                                                                                                                                                                                                                                                                                                                                   
                     <div class="prestamo-actions">
 
                        <a href="{{ url_for('detalle_prestamo', prestamo_id=prestamo.id) }}"
                             class="btn-small">
                                 Ver cuotas
                             </a>
+
+                       <a href="{{ url_for('editar_prestamo', prestamo_id=prestamo.id) }}" class="btn-small">
+                            Editar
+                       </a>
+
+                       <form method="POST" action="{{ url_for('eliminar_prestamo', prestamo_id=prestamo.id) }}" style="display:inline" onsubmit="return confirm('¿Eliminar este préstamo y todas sus cuotas/pagos?');">
+                           <button type="submit" class="btn-small btn-danger">Eliminar</button>
+                       </form>
                     </div>
 
                 </div>
