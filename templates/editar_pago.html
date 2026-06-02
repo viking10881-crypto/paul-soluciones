@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Pago | Solucione$ Paul{% endblock %}
+
+{% block content %}
+
+<section class="page-section">
+
+    <div class="page-header">
+        <div>
+            <h1>Editar pago #{{ pago.id }}</h1>
+            <p>Corrige el registro de pago y sincroniza los saldos.</p>
+        </div>
+
+        <a href="{{ url_for('detalle_prestamo', prestamo_id=pago.prestamo.id) }}" class="btn-small">
+            ← Volver al préstamo
+        </a>
+    </div>
+
+    <div class="form-card">
+        <form method="POST">
+            <div class="form-grid">
+
+                <div class="form-group">
+                    <label>Monto total del pago</label>
+                    <input type="number" step="0.01" name="monto" value="{{ pago.monto }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Capital pagado</label>
+                    <input type="number" step="0.01" name="capital_pagado" value="{{ pago.capital_pagado }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Interés pagado</label>
+                    <input type="number" step="0.01" name="interes_pagado" value="{{ pago.interes_pagado }}" required>
+                </div>
+
+                <div class="form-group full">
+                    <label>Nota</label>
+                    <input type="text" name="nota" value="{{ pago.nota or '' }}">
+                </div>
+
+            </div>
+
+            <button type="submit" class="btn-primary">Guardar pago</button>
+        </form>
+    </div>
+
+</section>
+
+{% endblock %}

@@ -53,6 +53,13 @@
 
     <div class="section-title">
         <h2>Cuotas del préstamo</h2>
+        <div style="margin-top: .5rem;">
+            {% if request.args.get('show_all') == '1' %}
+                <a href="{{ url_for('detalle_prestamo', prestamo_id=prestamo.id) }}" class="btn-small">Mostrar pendientes</a>
+            {% else %}
+                <a href="{{ url_for('detalle_prestamo', prestamo_id=prestamo.id) }}?show_all=1" class="btn-small">Mostrar todas</a>
+            {% endif %}
+        </div>
     </div>
 
     <div class="table-card">
@@ -113,12 +120,30 @@
                             <form method="POST"
                                   action="{{ url_for('pagar_cuota', cuota_id=cuota.id) }}">
 
+                                {#
+                                    Valores pendientes de pago para esta cuota.
+                                    Se usan en el JS para autocompletar el monto
+                                    según el tipo de pago seleccionado.
+                                #}
+                                <input type="hidden"
+                                       class="cuota-total-pendiente"
+                                       value="{{ cuota.total }}">
+                                <input type="hidden"
+                                       class="cuota-interes-pendiente"
+                                       value="{{ cuota.interes - cuota.pagado_interes }}">
+                                <input type="hidden"
+                                       class="cuota-capital-pendiente"
+                                       value="{{ cuota.capital - cuota.pagado_capital }}">
+                                <input type="hidden"
+                                       class="cuota-saldo-prestamo"
+                                       value="{{ prestamo.saldo_capital }}">
+
                                 <div class="payment-grid">
 
                                     <div class="form-group">
                                         <label>Tipo de pago</label>
 
-                                        <select name="tipo_pago" required>
+                                        <select name="tipo_pago" class="tipo-pago-select" required>
 
                                             <option value="cuota_completa">
                                                 Cuota completa
@@ -145,8 +170,15 @@
                                         <input type="number"
                                                step="0.01"
                                                name="monto"
+                                               class="monto-input"
                                                placeholder="Valor pagado"
                                                required>
+
+                                        <small class="monto-hint" style="display:none; color: var(--color-primary, #2563eb); margin-top: .25rem;">
+                                            Valor fijado automáticamente
+                                        </small>
+                                        <small class="monto-error" style="display:none; color: #ef4444; margin-top: .25rem; font-weight: 600;">
+                                        </small>
                                     </div>
 
                                     <div class="form-group">
@@ -165,11 +197,15 @@
 
                             </form>
 
+                        <div class="form-actions" style="margin-top: 1rem;">
+                            {% if cuota.pagos|length == 0 %}
+                            <a href="{{ url_for('editar_cuota', cuota_id=cuota.id) }}" class="btn-small btn-secondary">
+                                Editar cuota
+                            </a>
+                            {% else %}
+                            <span class="text-muted">No editable: cuota con pagos registrados</span>
+                            {% endif %}
                         </div>
-
-                    </td>
-
-                </tr>
 
                 {% endfor %}
 
@@ -207,6 +243,10 @@
                     {{ pago.fecha_pago.strftime('%d/%m/%Y %H:%M') }}
                 </strong>
 
+            </div>
+
+            <div style="margin-top: .5rem;">
+                <a href="{{ url_for('editar_pago', pago_id=pago.id) }}" class="btn-small btn-secondary">Editar pago</a>
             </div>
 
             <div class="payment-history-info">
@@ -250,5 +290,104 @@
     {% endif %}
 
 </section>
+
+<script>
+document.querySelectorAll(".payment-box form").forEach(function (form) {
+    const select      = form.querySelector(".tipo-pago-select");
+    const montoInput  = form.querySelector(".monto-input");
+    const montoHint   = form.querySelector(".monto-hint");
+    const montoError  = form.querySelector(".monto-error");
+    const btnSubmit   = form.querySelector("button[type='submit']");
+
+    // Valores embebidos desde Jinja
+    const totalCuota       = parseFloat(form.querySelector(".cuota-total-pendiente").value)   || 0;
+    const interesPendiente = parseFloat(form.querySelector(".cuota-interes-pendiente").value) || 0;
+    const capitalPendiente = parseFloat(form.querySelector(".cuota-capital-pendiente").value) || 0;
+    const saldoPrestamo    = parseFloat(form.querySelector(".cuota-saldo-prestamo").value)    || 0;
+
+    function ocultarError() {
+        montoError.style.display = "none";
+        montoError.textContent   = "";
+        montoInput.style.borderColor = "";
+        btnSubmit.disabled = false;
+    }
+
+    function mostrarError(msg) {
+        montoError.textContent   = "⚠ " + msg;
+        montoError.style.display = "block";
+        montoInput.style.borderColor = "#ef4444";
+        btnSubmit.disabled = true;
+    }
+
+    function validarMonto() {
+        const tipo  = select.value;
+        const valor = parseFloat(montoInput.value) || 0;
+
+        ocultarError();
+
+        if (tipo === "abono_capital") {
+            if (valor > capitalPendiente) {
+                mostrarError(
+                    "El abono ($" + valor.toLocaleString("es-CO") +
+                    ") supera el capital pendiente ($" +
+                    capitalPendiente.toLocaleString("es-CO") +
+                    "). Si cometiste un error, podrás editarlo desde el historial de pagos."
+                );
+            }
+        }
+
+        if (tipo === "abono_parcial") {
+            // El parcial no puede superar el total de la cuota (capital + interés pendiente)
+            const maxParcial = capitalPendiente + interesPendiente;
+            if (valor > maxParcial) {
+                mostrarError(
+                    "El abono ($" + valor.toLocaleString("es-CO") +
+                    ") supera el total pendiente de esta cuota ($" +
+                    maxParcial.toLocaleString("es-CO") +
+                    "). Si cometiste un error, podrás editarlo desde el historial de pagos."
+                );
+            }
+        }
+    }
+
+    function aplicarReglas() {
+        const tipo = select.value;
+
+        ocultarError();
+
+        if (tipo === "cuota_completa") {
+            montoInput.value     = totalCuota.toFixed(2);
+            montoInput.readOnly  = true;
+            montoHint.style.display = "block";
+
+        } else if (tipo === "solo_interes") {
+            montoInput.value     = interesPendiente.toFixed(2);
+            montoInput.readOnly  = false;
+            montoHint.style.display = "none";
+
+        } else {
+            // abono_capital / abono_parcial: campo libre con validación
+            montoInput.value     = "";
+            montoInput.readOnly  = false;
+            montoHint.style.display = "none";
+        }
+    }
+
+    aplicarReglas();
+
+    select.addEventListener("change", aplicarReglas);
+
+    // Validar en tiempo real mientras escribe
+    montoInput.addEventListener("input", validarMonto);
+
+    // Validar también antes de enviar por si acaso
+    form.addEventListener("submit", function (e) {
+        validarMonto();
+        if (btnSubmit.disabled) {
+            e.preventDefault();
+        }
+    });
+});
+</script>
 
 {% endblock %}

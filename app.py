@@ -67,6 +67,31 @@ def actualizar_cuotas_vencidas():
     db.session.commit()
 
 
+def recalcular_prestamo(prestamo):
+    """
+    Recalcula saldo_capital y estado del préstamo
+    leyendo el estado real de todas sus cuotas.
+    Llama esto después de cualquier cambio en cuotas o pagos.
+    """
+    saldo = 0
+    for c in prestamo.cuotas:
+        pagado = c.pagado_capital or 0
+        saldo += max(c.capital - pagado, 0)
+
+    prestamo.saldo_capital = max(saldo, 0)
+
+    if prestamo.saldo_capital <= 0:
+        prestamo.saldo_capital = 0
+        prestamo.estado = "pagado"
+    else:
+        hoy = date.today()
+        tiene_vencidas = any(
+            c.fecha_vencimiento < hoy and c.estado not in ("pagada",)
+            for c in prestamo.cuotas
+        )
+        prestamo.estado = "atrasado" if tiene_vencidas else "activo"
+
+
 @app.route("/")
 def inicio():
     if current_user.is_authenticated:
@@ -293,36 +318,36 @@ def pagar_cuota(cuota_id):
     if tipo_pago == "cuota_completa":
         capital_pagado = cuota.capital - cuota.pagado_capital
         interes_pagado = cuota.interes - cuota.pagado_interes
+
+        # Validar que no supere el saldo pendiente del préstamo
+        if capital_pagado > prestamo.saldo_capital:
+            flash(f"Error: Intenta pagar ${capital_pagado:,.0f} de capital pero solo hay ${prestamo.saldo_capital:,.0f} pendiente.", "error")
+            return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+
         cuota.pagado_capital = cuota.capital
         cuota.pagado_interes = cuota.interes
         cuota.estado = "pagada"
-        prestamo.saldo_capital -= capital_pagado
 
     elif tipo_pago == "solo_interes":
         interes_pagado = cuota.interes
         cuota.pagado_interes += interes_pagado
         cuota.estado = "solo_interes"
 
-        # Helper para avanzar meses respetando días válidos
         def avanzar_mes(fecha, meses=1):
             total_meses = fecha.month - 1 + meses
             year = fecha.year + total_meses // 12
             month = total_meses % 12 + 1
             day = fecha.day
-
             last_day = monthrange(year, month)[1]
             if day > last_day:
                 day = last_day
-
             return date(year, month, day)
 
-        # Obtener las cuotas restantes ordenadas por número
         cuotas_restantes = Cuota.query.filter(
             Cuota.prestamo_id == prestamo.id,
             Cuota.numero >= cuota.numero
         ).order_by(Cuota.numero.asc()).all()
 
-        # La nueva fecha de la primera cuota será la actual + 1 mes
         nueva = avanzar_mes(cuota.fecha_vencimiento, 1)
 
         for c in cuotas_restantes:
@@ -331,7 +356,15 @@ def pagar_cuota(cuota_id):
 
     elif tipo_pago == "abono_capital":
         capital_pagado = monto
-        prestamo.saldo_capital -= capital_pagado
+        
+        # Validar que no supere el saldo pendiente del préstamo
+        if capital_pagado > prestamo.saldo_capital:
+            flash(f"Error: Intenta pagar ${capital_pagado:,.0f} de capital pero solo hay ${prestamo.saldo_capital:,.0f} pendiente.", "error")
+            return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+        
+        cuota.pagado_capital += capital_pagado
+        if cuota.pagado_capital > cuota.capital:
+            cuota.pagado_capital = cuota.capital
 
     elif tipo_pago == "abono_parcial":
         restante_interes = cuota.interes - cuota.pagado_interes
@@ -342,18 +375,19 @@ def pagar_cuota(cuota_id):
         else:
             interes_pagado = restante_interes
             capital_pagado = monto - restante_interes
+            
+            # Validar que el capital a pagar no supere el saldo del préstamo
+            if capital_pagado > prestamo.saldo_capital:
+                flash(f"Error: Intenta pagar ${capital_pagado:,.0f} de capital pero solo hay ${prestamo.saldo_capital:,.0f} pendiente.", "error")
+                return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+            
             cuota.pagado_interes = cuota.interes
             cuota.pagado_capital += capital_pagado
-            prestamo.saldo_capital -= capital_pagado
 
         cuota.estado = "parcial"
 
         if cuota.pagado_capital >= cuota.capital and cuota.pagado_interes >= cuota.interes:
             cuota.estado = "pagada"
-
-    if prestamo.saldo_capital <= 0:
-        prestamo.saldo_capital = 0
-        prestamo.estado = "pagado"
 
     pago = Pago(
         prestamo_id=prestamo.id,
@@ -366,19 +400,66 @@ def pagar_cuota(cuota_id):
     )
 
     db.session.add(pago)
+
+    # Recalcular saldo y estado del préstamo desde cero
+    recalcular_prestamo(prestamo)
+
     db.session.commit()
 
     flash("Pago registrado correctamente", "success")
     return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+
+
+@app.route("/cuota/editar/<int:cuota_id>", methods=["GET", "POST"])
+@login_required
+def editar_cuota(cuota_id):
+    cuota = Cuota.query.get_or_404(cuota_id)
+    pagos_existentes = Pago.query.filter_by(cuota_id=cuota.id).count()
+
+    if pagos_existentes > 0:
+        flash("No se puede editar esta cuota porque ya tiene pagos registrados.", "error")
+        return redirect(url_for("detalle_prestamo", prestamo_id=cuota.prestamo_id))
+
+    if request.method == "POST":
+        cuota.fecha_vencimiento = date.fromisoformat(request.form.get("fecha_vencimiento"))
+        cuota.capital = float(request.form.get("capital"))
+        cuota.interes = float(request.form.get("interes"))
+        cuota.total = cuota.capital + cuota.interes
+        cuota.estado = "pendiente"
+        # pagado_capital / pagado_interes se quedan en 0
+        # (bloqueamos edición si ya hay pagos)
+
+        prestamo = cuota.prestamo
+
+        # Recalcular monto del préstamo como suma de capitales de todas las cuotas
+        prestamo.monto = sum(c.capital for c in prestamo.cuotas)
+        prestamo.numero_cuotas = len(prestamo.cuotas)
+
+        recalcular_prestamo(prestamo)
+
+        db.session.commit()
+        flash("Cuota actualizada y saldos recalculados correctamente", "success")
+        return redirect(url_for("detalle_prestamo", prestamo_id=cuota.prestamo_id))
+
+    return render_template("editar_cuota.html", cuota=cuota)
+
 
 @app.route("/prestamo/<int:prestamo_id>")
 @login_required
 def detalle_prestamo(prestamo_id):
     prestamo = Prestamo.query.get_or_404(prestamo_id)
 
-    cuotas = Cuota.query.filter_by(
-        prestamo_id=prestamo.id
-    ).order_by(Cuota.numero.asc()).all()
+    show_all = request.args.get("show_all") == "1"
+
+    if show_all:
+        cuotas = Cuota.query.filter_by(
+            prestamo_id=prestamo.id
+        ).order_by(Cuota.numero.asc()).all()
+    else:
+        cuotas = Cuota.query.filter(
+            Cuota.prestamo_id == prestamo.id,
+            Cuota.estado != "pagada"
+        ).order_by(Cuota.numero.asc()).all()
 
     pagos = Pago.query.filter_by(
         prestamo_id=prestamo.id
@@ -392,45 +473,101 @@ def detalle_prestamo(prestamo_id):
     )
 
 
+@app.route("/pago/editar/<int:pago_id>", methods=["GET", "POST"])
+@login_required
+def editar_pago(pago_id):
+    pago = Pago.query.get_or_404(pago_id)
+    prestamo = pago.prestamo
+    cuota = pago.cuota
+
+    if request.method == "POST":
+        pago.monto = float(request.form.get("monto"))
+        pago.capital_pagado = float(request.form.get("capital_pagado", 0))
+        pago.interes_pagado = float(request.form.get("interes_pagado", 0))
+        pago.nota = request.form.get("nota")
+
+        # Reconstruir pagado_capital y pagado_interes de la cuota
+        # sumando TODOS sus pagos (incluyendo el que acabamos de editar)
+        if cuota:
+            todos_pagos = Pago.query.filter_by(cuota_id=cuota.id).all()
+
+            cuota.pagado_capital = sum(p.capital_pagado or 0 for p in todos_pagos)
+            cuota.pagado_interes = sum(p.interes_pagado or 0 for p in todos_pagos)
+
+            # Validar que no se superen los límites de la cuota
+            if cuota.pagado_capital > cuota.capital:
+                flash(f"Error: Intenta pagar ${cuota.pagado_capital:,.0f} de capital pero la cuota solo es ${cuota.capital:,.0f}.", "error")
+                return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
+
+            if cuota.pagado_interes > cuota.interes:
+                flash(f"Error: Intenta pagar ${cuota.pagado_interes:,.0f} de interés pero la cuota solo es ${cuota.interes:,.0f}.", "error")
+                return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
+
+            # Normalizar por si los valores superan lo esperado
+            cuota.pagado_capital = min(cuota.pagado_capital, cuota.capital)
+            cuota.pagado_interes = min(cuota.pagado_interes, cuota.interes)
+
+            # Recalcular estado de la cuota
+            if cuota.pagado_capital >= cuota.capital and cuota.pagado_interes >= cuota.interes:
+                cuota.estado = "pagada"
+            elif cuota.pagado_capital == 0 and cuota.pagado_interes > 0:
+                cuota.estado = "solo_interes"
+            elif cuota.pagado_capital > 0 or cuota.pagado_interes > 0:
+                cuota.estado = "parcial"
+            else:
+                cuota.estado = "pendiente"
+
+        # Recalcular saldo y estado del préstamo desde cero
+        recalcular_prestamo(prestamo)
+
+        db.session.commit()
+        flash("Pago actualizado y saldos recalculados correctamente", "success")
+        return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
+
+    return render_template("editar_pago.html", pago=pago)
+
+
 @app.route("/prestamo/editar/<int:prestamo_id>", methods=["GET", "POST"])
 @login_required
 def editar_prestamo(prestamo_id):
     prestamo = Prestamo.query.get_or_404(prestamo_id)
 
     if request.method == "POST":
-        monto = float(request.form.get("monto"))
-        numero_cuotas = int(request.form.get("numero_cuotas"))
+        monto_nuevo = float(request.form.get("monto"))
+        numero_cuotas_nuevo = int(request.form.get("numero_cuotas"))
         dia_pago = int(request.form.get("dia_pago"))
         interes_mensual = float(request.form.get("interes_mensual", prestamo.interes_mensual))
 
         pagos_existentes = Pago.query.filter_by(prestamo_id=prestamo.id).count()
 
-        # Si hay pagos, no permitimos cambiar monto o número de cuotas
-        if pagos_existentes > 0 and (monto != prestamo.monto or numero_cuotas != prestamo.numero_cuotas):
-            flash("No se puede cambiar monto o número de cuotas porque ya existen pagos registrados.", "error")
+        cambia_estructura = (
+            monto_nuevo != prestamo.monto or
+            numero_cuotas_nuevo != prestamo.numero_cuotas
+        )
+
+        if pagos_existentes > 0 and cambia_estructura:
+            flash(
+                "No se puede cambiar monto o número de cuotas porque ya existen pagos registrados.",
+                "error"
+            )
             return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
 
-        # Actualizar campos básicos
         prestamo.interes_mensual = interes_mensual
         prestamo.dia_pago = dia_pago
 
-        if pagos_existentes == 0 and (monto != prestamo.monto or numero_cuotas != prestamo.numero_cuotas):
-            # Recalcular cuotas si no hay pagos
-            prestamo.monto = monto
-            prestamo.numero_cuotas = numero_cuotas
-            prestamo.saldo_capital = monto
+        if pagos_existentes == 0:
+            # Reconstruir cuotas desde cero
+            prestamo.monto = monto_nuevo
+            prestamo.numero_cuotas = numero_cuotas_nuevo
 
-            # eliminar cuotas existentes
             Cuota.query.filter_by(prestamo_id=prestamo.id).delete()
 
-            # crear nuevas cuotas
-            capital_cuota = monto / numero_cuotas
-            interes_cuota = monto * (interes_mensual / 100)
+            capital_cuota = monto_nuevo / numero_cuotas_nuevo
+            interes_cuota = monto_nuevo * (interes_mensual / 100)
             total_cuota = capital_cuota + interes_cuota
-
             hoy = date.today()
 
-            for i in range(1, numero_cuotas + 1):
+            for i in range(1, numero_cuotas_nuevo + 1):
                 mes = hoy.month + i
                 year = hoy.year + (mes - 1) // 12
                 month = ((mes - 1) % 12) + 1
@@ -440,7 +577,7 @@ def editar_prestamo(prestamo_id):
                 except ValueError:
                     fecha_vencimiento = date(year, month, 28)
 
-                cuota = Cuota(
+                db.session.add(Cuota(
                     prestamo_id=prestamo.id,
                     numero=i,
                     fecha_vencimiento=fecha_vencimiento,
@@ -448,13 +585,22 @@ def editar_prestamo(prestamo_id):
                     interes=interes_cuota,
                     total=total_cuota,
                     estado="pendiente"
-                )
+                ))
 
-                db.session.add(cuota)
+            db.session.flush()  # para que prestamo.cuotas esté actualizado antes de recalcular
+
+        else:
+            # Solo cambió interés o día de pago:
+            # actualizar interés en cuotas que aún no están pagadas
+            for c in prestamo.cuotas:
+                if c.estado not in ("pagada",):
+                    c.interes = prestamo.monto * (interes_mensual / 100)
+                    c.total = c.capital + c.interes
+
+        recalcular_prestamo(prestamo)
 
         db.session.commit()
-
-        flash("Préstamo actualizado correctamente", "success")
+        flash("Préstamo actualizado y saldos recalculados correctamente", "success")
         return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
 
     return render_template("nuevo_prestamo.html", deudor=prestamo.deudor, prestamo=prestamo)

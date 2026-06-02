@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Cuota | Solucione$ Paul{% endblock %}
+
+{% block content %}
+
+<section class="page-section">
+
+    <div class="page-header">
+
+        <div>
+            <h1>Editar cuota #{{ cuota.numero }}</h1>
+            <p>Corrige los datos antes de que afecten las cuentas.</p>
+        </div>
+
+        <a href="{{ url_for('detalle_prestamo', prestamo_id=cuota.prestamo.id) }}" class="btn-small">
+            ← Volver al préstamo
+        </a>
+
+    </div>
+
+    <div class="form-card">
+
+        <form method="POST">
+
+            <div class="form-grid">
+
+                <div class="form-group">
+                    <label>Fecha de vencimiento</label>
+                    <input type="date" name="fecha_vencimiento" value="{{ cuota.fecha_vencimiento.isoformat() }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Capital</label>
+                    <input type="number" step="0.01" name="capital" value="{{ cuota.capital }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Interés</label>
+                    <input type="number" step="0.01" name="interes" value="{{ cuota.interes }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Total</label>
+                    <input type="number" step="0.01" name="total" value="{{ cuota.capital + cuota.interes }}" readonly>
+                    <small>Se recalcula automáticamente como capital + interés.</small>
+                </div>
+
+            </div>
+
+            <button type="submit" class="btn-primary">
+                Guardar cambios
+            </button>
+
+        </form>
+
+    </div>
+
+</section>
+
+{% endblock %}
