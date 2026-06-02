@@ -182,6 +182,40 @@ def detalle_deudor(deudor_id):
     return render_template("detalle_deudor.html", deudor=deudor)
 
 
+@app.route("/deudores/editar/<int:deudor_id>", methods=["GET", "POST"])
+@login_required
+def editar_deudor(deudor_id):
+    deudor = Deudor.query.get_or_404(deudor_id)
+
+    if request.method == "POST":
+        deudor.nombre = request.form.get("nombre")
+        deudor.cedula = request.form.get("cedula")
+        deudor.telefono = request.form.get("telefono")
+        deudor.direccion = request.form.get("direccion")
+        deudor.correo = request.form.get("correo")
+        deudor.referencia = request.form.get("referencia")
+        deudor.nota = request.form.get("nota")
+
+        db.session.commit()
+
+        flash("Deudor actualizado correctamente", "success")
+        return redirect(url_for("deudores"))
+
+    return render_template("nuevo_deudor.html", deudor=deudor)
+
+
+@app.route("/deudores/eliminar/<int:deudor_id>", methods=["POST"])
+@login_required
+def eliminar_deudor(deudor_id):
+    deudor = Deudor.query.get_or_404(deudor_id)
+
+    db.session.delete(deudor)
+    db.session.commit()
+
+    flash("Deudor eliminado correctamente", "success")
+    return redirect(url_for("deudores"))
+
+
 @app.route("/prestamo/nuevo/<int:deudor_id>", methods=["GET", "POST"])
 @login_required
 def nuevo_prestamo(deudor_id):

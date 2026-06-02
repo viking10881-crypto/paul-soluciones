@@ -56,6 +56,14 @@
                             <a href="{{ url_for('detalle_deudor', deudor_id=deudor.id) }}" class="btn-small">
                                 Ver detalle
                             </a>
+
+                            <a href="{{ url_for('editar_deudor', deudor_id=deudor.id) }}" class="btn-small">
+                                Editar
+                            </a>
+
+                            <form method="POST" action="{{ url_for('eliminar_deudor', deudor_id=deudor.id) }}" style="display:inline" onsubmit="return confirm('¿Eliminar este deudor y todos sus préstamos asociados?');">
+                                <button type="submit" class="btn-small btn-danger">Eliminar</button>
+                            </form>
                         </td>
                     </tr>
 
