@@ -19,9 +19,9 @@ class Deudor(db.Model):
     __tablename__ = "deudores"
 
     id = db.Column(db.Integer, primary_key=True)
-    nombre = db.Column(db.String(150), nullable=False)
-    cedula = db.Column(db.String(50), unique=True, nullable=False)
-    telefono = db.Column(db.String(50), nullable=False)
+    nombre = db.Column(db.String(150), nullable=True)
+    cedula = db.Column(db.String(50), unique=True, nullable=True)
+    telefono = db.Column(db.String(50), nullable=True)
     direccion = db.Column(db.String(200))
     correo = db.Column(db.String(120))
     referencia = db.Column(db.String(150))

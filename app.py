@@ -183,9 +183,9 @@ def deudores():
 def nuevo_deudor():
     if request.method == "POST":
         deudor = Deudor(
-            nombre=request.form.get("nombre"),
-            cedula=request.form.get("cedula"),
-            telefono=request.form.get("telefono"),
+            nombre=request.form.get("nombre") or None,
+            cedula=request.form.get("cedula") or None,
+            telefono=request.form.get("telefono") or None,
             direccion=request.form.get("direccion"),
             correo=request.form.get("correo"),
             referencia=request.form.get("referencia"),
@@ -214,9 +214,9 @@ def editar_deudor(deudor_id):
     deudor = Deudor.query.get_or_404(deudor_id)
 
     if request.method == "POST":
-        deudor.nombre = request.form.get("nombre")
-        deudor.cedula = request.form.get("cedula")
-        deudor.telefono = request.form.get("telefono")
+        deudor.nombre = request.form.get("nombre") or None
+        deudor.cedula = request.form.get("cedula") or None
+        deudor.telefono = request.form.get("telefono") or None
         deudor.direccion = request.form.get("direccion")
         deudor.correo = request.form.get("correo")
         deudor.referencia = request.form.get("referencia")
