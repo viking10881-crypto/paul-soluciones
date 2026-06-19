@@ -25,9 +25,8 @@
                     <tr>
                         <th>Estado</th>
                         <th>Nombre</th>
-                        <th>Cédula</th>
                         <th>Teléfono</th>
-                        <th>Dirección</th>
+                        <th>Referencia</th>
                         <th>Acción</th>
                     </tr>
                 </thead>
@@ -49,9 +48,8 @@
                             {% endif %}
                         </td>
                         <td>{{ deudor.nombre }}</td>
-                        <td>{{ deudor.cedula }}</td>
-                        <td>{{ deudor.telefono }}</td>
-                        <td>{{ deudor.direccion or "Sin dirección" }}</td>
+                        <td>{{ deudor.telefono or "—" }}</td>
+                        <td>{{ deudor.referencia or "—" }}</td>
                         <td>
                             <a href="{{ url_for('detalle_deudor', deudor_id=deudor.id) }}" class="btn-small">
                                 Ver detalle

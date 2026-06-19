@@ -184,10 +184,7 @@ def nuevo_deudor():
     if request.method == "POST":
         deudor = Deudor(
             nombre=request.form.get("nombre") or None,
-            cedula=request.form.get("cedula") or None,
             telefono=request.form.get("telefono") or None,
-            direccion=request.form.get("direccion"),
-            correo=request.form.get("correo"),
             referencia=request.form.get("referencia"),
             nota=request.form.get("nota")
         )
@@ -215,10 +212,7 @@ def editar_deudor(deudor_id):
 
     if request.method == "POST":
         deudor.nombre = request.form.get("nombre") or None
-        deudor.cedula = request.form.get("cedula") or None
         deudor.telefono = request.form.get("telefono") or None
-        deudor.direccion = request.form.get("direccion")
-        deudor.correo = request.form.get("correo")
         deudor.referencia = request.form.get("referencia")
         deudor.nota = request.form.get("nota")
 
@@ -604,6 +598,93 @@ def editar_prestamo(prestamo_id):
         return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
 
     return render_template("nuevo_prestamo.html", deudor=prestamo.deudor, prestamo=prestamo)
+
+
+@app.route("/prestamo/refinanciar/<int:prestamo_id>", methods=["GET", "POST"])
+@login_required
+def refinanciar_prestamo(prestamo_id):
+    prestamo_anterior = Prestamo.query.get_or_404(prestamo_id)
+    deudor = prestamo_anterior.deudor
+
+    if prestamo_anterior.estado in ("pagado", "refinanciado"):
+        flash("Este préstamo no puede refinanciarse.", "error")
+        return redirect(url_for("detalle_prestamo", prestamo_id=prestamo_id))
+
+    if request.method == "POST":
+        monto_nuevo = float(request.form.get("monto"))
+        numero_cuotas = int(request.form.get("numero_cuotas"))
+        dia_pago = int(request.form.get("dia_pago"))
+        interes_mensual = float(request.form.get("interes_mensual", 7.0))
+
+        saldo_pendiente = prestamo_anterior.saldo_capital
+
+        if monto_nuevo < saldo_pendiente:
+            flash(
+                f"El nuevo monto (${monto_nuevo:,.0f}) debe ser mayor o igual "
+                f"al saldo pendiente (${saldo_pendiente:,.0f}).",
+                "error"
+            )
+            return render_template("refinanciar_prestamo.html", prestamo=prestamo_anterior, deudor=deudor)
+
+        # Cerrar préstamo anterior
+        for cuota in prestamo_anterior.cuotas:
+            if cuota.estado != "pagada":
+                cuota.pagado_capital = cuota.capital
+                cuota.pagado_interes = cuota.interes
+                cuota.estado = "pagada"
+
+        prestamo_anterior.saldo_capital = 0
+        prestamo_anterior.estado = "refinanciado"
+
+        # Crear nuevo préstamo
+        nuevo_prestamo = Prestamo(
+            deudor_id=deudor.id,
+            monto=monto_nuevo,
+            interes_mensual=interes_mensual,
+            numero_cuotas=numero_cuotas,
+            dia_pago=dia_pago,
+            saldo_capital=monto_nuevo,
+            estado="activo"
+        )
+        db.session.add(nuevo_prestamo)
+        db.session.flush()
+
+        capital_cuota = monto_nuevo / numero_cuotas
+        interes_cuota = monto_nuevo * (interes_mensual / 100)
+        total_cuota = capital_cuota + interes_cuota
+        hoy = date.today()
+
+        for i in range(1, numero_cuotas + 1):
+            mes = hoy.month + i
+            year = hoy.year + (mes - 1) // 12
+            month = ((mes - 1) % 12) + 1
+            try:
+                fecha_vencimiento = date(year, month, dia_pago)
+            except ValueError:
+                fecha_vencimiento = date(year, month, 28)
+
+            db.session.add(Cuota(
+                prestamo_id=nuevo_prestamo.id,
+                numero=i,
+                fecha_vencimiento=fecha_vencimiento,
+                capital=capital_cuota,
+                interes=interes_cuota,
+                total=total_cuota,
+                estado="pendiente"
+            ))
+
+        db.session.commit()
+
+        efectivo = monto_nuevo - saldo_pendiente
+        flash(
+            f"Refinanciamiento exitoso. Saldo absorbido: ${saldo_pendiente:,.0f}. "
+            f"Efectivo entregado al cliente: ${efectivo:,.0f}. "
+            f"Nuevo préstamo #{nuevo_prestamo.id} por ${monto_nuevo:,.0f}.",
+            "success"
+        )
+        return redirect(url_for("detalle_deudor", deudor_id=deudor.id))
+
+    return render_template("refinanciar_prestamo.html", prestamo=prestamo_anterior, deudor=deudor)
 
 
 @app.route("/prestamo/eliminar/<int:prestamo_id>", methods=["POST"])

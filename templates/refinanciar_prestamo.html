@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}Refinanciar Préstamo | Solucione$ Paul{% endblock %}
+
+{% block content %}
+
+<section class="page-section">
+
+    <div class="page-header">
+        <div>
+            <h1>Refinanciar Préstamo #{{ prestamo.id }}</h1>
+            <p>Cliente: {{ deudor.nombre }}</p>
+        </div>
+
+        <a href="{{ url_for('detalle_deudor', deudor_id=deudor.id) }}" class="btn-small">
+            ← Volver
+        </a>
+    </div>
+
+    <!-- ESTADO ACTUAL DEL PRÉSTAMO -->
+    <div class="prestamo-resumen" style="margin-bottom: 1.5rem;">
+        <div class="metric-card">
+            <span>Préstamo original</span>
+            <h2>${{ "{:,.0f}".format(prestamo.monto) }}</h2>
+        </div>
+        <div class="metric-card">
+            <span>Saldo pendiente</span>
+            <h2 style="color: #f87171;">${{ "{:,.0f}".format(prestamo.saldo_capital) }}</h2>
+        </div>
+        <div class="metric-card">
+            <span>Cuotas totales</span>
+            <h2>{{ prestamo.numero_cuotas }}</h2>
+        </div>
+    </div>
+
+    <div class="form-card">
+
+        <form method="POST">
+
+            <div class="form-grid">
+
+                <div class="form-group">
+                    <label>Nuevo monto total</label>
+                    <input type="number" name="monto" id="monto"
+                           placeholder="Ej: 1500000"
+                           min="{{ prestamo.saldo_capital | int }}"
+                           step="1000"
+                           required>
+                    <small style="color: var(--color-text-muted, #94a3b8); margin-top: .25rem; display: block;">
+                        Mínimo: ${{ "{:,.0f}".format(prestamo.saldo_capital) }} (saldo pendiente)
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label>Número de cuotas</label>
+                    <input type="number" name="numero_cuotas" id="numero_cuotas"
+                           placeholder="Ej: 6" min="1" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Día de pago mensual</label>
+                    <input type="number" name="dia_pago" min="1" max="31"
+                           placeholder="Ej: 15" value="{{ prestamo.dia_pago }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Interés mensual (%)</label>
+                    <input type="number" name="interes_mensual" id="interes_mensual"
+                           placeholder="Ej: 7" min="0" max="100" step="0.1"
+                           value="{{ prestamo.interes_mensual }}" required>
+                </div>
+
+            </div>
+
+            <!-- SIMULACIÓN -->
+            <div class="simulator-card">
+                <h3>Simulación de refinanciamiento</h3>
+
+                <div class="simulator-grid">
+                    <div>
+                        <span>Interés mensual</span>
+                        <strong id="interes_preview">$0</strong>
+                    </div>
+                    <div>
+                        <span>Capital por cuota</span>
+                        <strong id="capital_preview">$0</strong>
+                    </div>
+                    <div>
+                        <span>Cuota mensual aprox.</span>
+                        <strong id="cuota_preview">$0</strong>
+                    </div>
+                    <div>
+                        <span>Saldo absorbido</span>
+                        <strong style="color: #f87171;">${{ "{:,.0f}".format(prestamo.saldo_capital) }}</strong>
+                    </div>
+                    <div>
+                        <span>Efectivo al cliente</span>
+                        <strong id="efectivo_preview" style="color: #34d399;">$0</strong>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-primary"
+                    onclick="return confirm('¿Confirmar refinanciamiento? El préstamo #{{ prestamo.id }} se cerrará y se creará uno nuevo.')">
+                Confirmar Refinanciamiento
+            </button>
+
+        </form>
+
+    </div>
+
+</section>
+
+<script>
+const montoInput     = document.getElementById("monto");
+const cuotasInput    = document.getElementById("numero_cuotas");
+const interesInput   = document.getElementById("interes_mensual");
+const saldoPendiente = {{ prestamo.saldo_capital }};
+
+const interesPreview  = document.getElementById("interes_preview");
+const capitalPreview  = document.getElementById("capital_preview");
+const cuotaPreview    = document.getElementById("cuota_preview");
+const efectivoPreview = document.getElementById("efectivo_preview");
+
+function formatoCOP(valor) {
+    return new Intl.NumberFormat("es-CO", {
+        style: "currency",
+        currency: "COP",
+        maximumFractionDigits: 0
+    }).format(valor || 0);
+}
+
+function calcularPreview() {
+    const monto  = parseFloat(montoInput.value)   || 0;
+    const cuotas = parseInt(cuotasInput.value)    || 0;
+    const tasa   = parseFloat(interesInput.value) || 0;
+
+    const interes  = monto * (tasa / 100);
+    const capital  = cuotas > 0 ? monto / cuotas : 0;
+    const cuota    = capital + interes;
+    const efectivo = monto >= saldoPendiente ? monto - saldoPendiente : 0;
+
+    interesPreview.textContent  = formatoCOP(interes);
+    capitalPreview.textContent  = formatoCOP(capital);
+    cuotaPreview.textContent    = formatoCOP(cuota);
+    efectivoPreview.textContent = formatoCOP(efectivo);
+}
+
+montoInput.addEventListener("input", calcularPreview);
+cuotasInput.addEventListener("input", calcularPreview);
+interesInput.addEventListener("input", calcularPreview);
+
+calcularPreview();
+</script>
+
+{% endblock %}

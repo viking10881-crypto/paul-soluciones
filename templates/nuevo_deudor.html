@@ -24,28 +24,13 @@
             <div class="form-grid">
 
                 <div class="form-group">
-                    <label>Nombre completo</label>
-                    <input type="text" name="nombre" placeholder="Ej: Juan Pérez" value="{{ deudor.nombre if deudor else '' }}">
+                    <label>Nombre completo *</label>
+                    <input type="text" name="nombre" placeholder="Ej: Juan Pérez" value="{{ deudor.nombre if deudor else '' }}" required>
                 </div>
 
                 <div class="form-group">
-                    <label>Cédula</label>
-                    <input type="text" name="cedula" placeholder="Ej: 123456789" value="{{ deudor.cedula if deudor else '' }}">
-                </div>
-
-                <div class="form-group">
-                    <label>Teléfono</label>
-                    <input type="text" name="telefono" placeholder="Ej: 3001234567" value="{{ deudor.telefono if deudor else '' }}">
-                </div>
-
-                <div class="form-group">
-                    <label>Correo</label>
-                    <input type="email" name="correo" placeholder="Opcional" value="{{ deudor.correo if deudor else '' }}">
-                </div>
-
-                <div class="form-group full">
-                    <label>Dirección</label>
-                    <input type="text" name="direccion" placeholder="Dirección del deudor" value="{{ deudor.direccion if deudor else '' }}">
+                    <label>Teléfono *</label>
+                    <input type="text" name="telefono" placeholder="Ej: 3001234567" value="{{ deudor.telefono if deudor else '' }}" required>
                 </div>
 
                 <div class="form-group full">
@@ -54,7 +39,7 @@
                 </div>
 
                 <div class="form-group full">
-                    <label>Nota adicional</label>
+                    <label>Nota / Observación</label>
                     <textarea name="nota" rows="4" placeholder="Observaciones importantes">{{ deudor.nota if deudor else '' }}</textarea>
                 </div>
 

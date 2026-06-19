@@ -883,6 +883,17 @@ textarea {
     color: #f87171;
 }
 
+.estado-refinanciado {
+    background: rgba(139,92,246,0.15);
+    color: #a78bfa;
+}
+
+.btn-refinanciar {
+    background: rgba(139,92,246,0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(139,92,246,0.3);
+}
+
 .prestamo-info {
     display: grid;
     grid-template-columns: repeat(3, 1fr);

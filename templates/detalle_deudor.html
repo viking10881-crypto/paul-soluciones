@@ -38,29 +38,21 @@
             <div class="info-list">
 
                 <div class="info-item">
-                    <span>Cédula</span>
-                    <strong>{{ deudor.cedula }}</strong>
-                </div>
-
-                <div class="info-item">
                     <span>Teléfono</span>
-                    <strong>{{ deudor.telefono }}</strong>
-                </div>
-
-                <div class="info-item">
-                    <span>Correo</span>
-                    <strong>{{ deudor.correo or "No registrado" }}</strong>
-                </div>
-
-                <div class="info-item">
-                    <span>Dirección</span>
-                    <strong>{{ deudor.direccion or "No registrada" }}</strong>
+                    <strong>{{ deudor.telefono or "No registrado" }}</strong>
                 </div>
 
                 <div class="info-item">
                     <span>Referencia</span>
                     <strong>{{ deudor.referencia or "No registrada" }}</strong>
                 </div>
+
+                {% if deudor.nota %}
+                <div class="info-item">
+                    <span>Nota / Observación</span>
+                    <strong>{{ deudor.nota }}</strong>
+                </div>
+                {% endif %}
 
             </div>
 
@@ -129,6 +121,12 @@
                             class="btn-small">
                                 Ver cuotas
                             </a>
+
+                       {% if prestamo.estado in ('activo', 'atrasado') %}
+                       <a href="{{ url_for('refinanciar_prestamo', prestamo_id=prestamo.id) }}" class="btn-small btn-refinanciar">
+                           Refinanciar
+                       </a>
+                       {% endif %}
 
                        <a href="{{ url_for('editar_prestamo', prestamo_id=prestamo.id) }}" class="btn-small">
                             Editar
