@@ -36,6 +36,13 @@
                     ➕ Nuevo Deudor
                 </a>
 
+                <a href="{{ url_for('notificaciones') }}" data-label="Notificaciones" class="nav-notif">
+                    🔔 Cobros mañana
+                    {% if notificaciones_count > 0 %}
+                        <span class="notif-badge">{{ notificaciones_count }}</span>
+                    {% endif %}
+                </a>
+
                 <a href="{{ url_for('logout') }}" data-label="Cerrar sesión">
                     🚪 Cerrar sesión
                 </a>

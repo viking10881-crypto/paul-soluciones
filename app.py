@@ -1,5 +1,5 @@
 import os
-from datetime import date
+from datetime import date, timedelta
 from calendar import monthrange
 from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -34,6 +34,18 @@ login_manager.login_message = "Debes iniciar sesión para continuar."
 @login_manager.user_loader
 def load_user(user_id):
     return Usuario.query.get(int(user_id))
+
+
+@app.context_processor
+def inject_notificaciones_count():
+    if current_user.is_authenticated:
+        manana = date.today() + timedelta(days=1)
+        count = Cuota.query.filter(
+            Cuota.fecha_vencimiento == manana,
+            Cuota.estado.notin_(["pagada"])
+        ).count()
+        return {"notificaciones_count": count}
+    return {"notificaciones_count": 0}
 
 
 def crear_admin():
@@ -598,6 +610,45 @@ def editar_prestamo(prestamo_id):
         return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
 
     return render_template("nuevo_prestamo.html", deudor=prestamo.deudor, prestamo=prestamo)
+
+
+@app.route("/notificaciones")
+@login_required
+def notificaciones():
+    manana = date.today() + timedelta(days=1)
+
+    cuotas_manana = Cuota.query.filter(
+        Cuota.fecha_vencimiento == manana,
+        Cuota.estado.notin_(["pagada"])
+    ).all()
+
+    deudores_map = {}
+    for cuota in cuotas_manana:
+        prestamo = cuota.prestamo
+        deudor = prestamo.deudor
+
+        if deudor.id not in deudores_map:
+            deudores_map[deudor.id] = {
+                "deudor": deudor,
+                "cuotas_manana": [],
+                "monto_cobrar": 0,
+                "cuotas_pendientes": sum(
+                    1 for p in deudor.prestamos
+                    for c in p.cuotas
+                    if c.estado not in ("pagada",)
+                ),
+                "saldo_total": sum(
+                    p.saldo_capital for p in deudor.prestamos
+                )
+            }
+
+        deudores_map[deudor.id]["cuotas_manana"].append(cuota)
+        pendiente_cuota = (cuota.capital - cuota.pagado_capital) + (cuota.interes - cuota.pagado_interes)
+        deudores_map[deudor.id]["monto_cobrar"] += pendiente_cuota
+
+    avisos = list(deudores_map.values())
+
+    return render_template("notificaciones.html", avisos=avisos, manana=manana)
 
 
 @app.route("/prestamo/refinanciar/<int:prestamo_id>", methods=["GET", "POST"])

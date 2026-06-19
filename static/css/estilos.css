@@ -1288,3 +1288,110 @@ textarea {
         display: none !important;
     }
 }
+
+/* ── NOTIFICACIONES BADGE ── */
+.nav-notif {
+    position: relative;
+}
+
+.notif-badge {
+    position: absolute;
+    top: 6px;
+    right: 12px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 1px 6px;
+    line-height: 1.5;
+}
+
+/* ── PÁGINA NOTIFICACIONES ── */
+.notif-resumen {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 1.5rem;
+}
+
+.notif-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.notif-card {
+    background: var(--color-card, #1e293b);
+    border: 1px solid var(--color-border, rgba(255,255,255,0.08));
+    border-radius: 14px;
+    padding: 1.25rem 1.5rem;
+}
+
+.notif-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+    gap: 1rem;
+}
+
+.notif-card-header h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin: 0 0 .25rem 0;
+}
+
+.notif-telefono {
+    font-size: 13px;
+    color: var(--color-text-muted, #94a3b8);
+    margin: 0;
+}
+
+.notif-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.notif-item {
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    padding: .75rem 1rem;
+}
+
+.notif-item span {
+    display: block;
+    font-size: 12px;
+    color: var(--color-text-muted, #94a3b8);
+    margin-bottom: .25rem;
+}
+
+.notif-item strong {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.notif-item-cobrar strong {
+    color: #34d399;
+}
+
+.notif-item-deuda strong {
+    color: #f87171;
+}
+
+.notif-multi {
+    margin-top: .75rem;
+    font-size: 13px;
+    color: #fbbf24;
+}
+
+/* Light mode overrides */
+.light-mode .notif-card {
+    background: #f8fafc;
+    border-color: rgba(0,0,0,0.08);
+}
+
+.light-mode .notif-item {
+    background: rgba(0,0,0,0.04);
+}
