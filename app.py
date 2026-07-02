@@ -36,15 +36,27 @@ def load_user(user_id):
     return Usuario.query.get(int(user_id))
 
 
+def obtener_cuotas_urgentes():
+    hoy = date.today()
+    manana = hoy + timedelta(days=1)
+
+    cuotas_urgentes = Cuota.query.filter(
+        Cuota.estado.notin_(["pagada"]),
+        (
+            (Cuota.fecha_vencimiento == manana) |
+            (Cuota.fecha_vencimiento == hoy) |
+            (Cuota.fecha_vencimiento < hoy)
+        )
+    ).all()
+
+    return hoy, manana, cuotas_urgentes
+
+
 @app.context_processor
 def inject_notificaciones_count():
     if current_user.is_authenticated:
-        manana = date.today() + timedelta(days=1)
-        count = Cuota.query.filter(
-            Cuota.fecha_vencimiento == manana,
-            Cuota.estado.notin_(["pagada"])
-        ).count()
-        return {"notificaciones_count": count}
+        _, _, cuotas_urgentes = obtener_cuotas_urgentes()
+        return {"notificaciones_count": len(cuotas_urgentes)}
     return {"notificaciones_count": 0}
 
 
@@ -615,40 +627,59 @@ def editar_prestamo(prestamo_id):
 @app.route("/notificaciones")
 @login_required
 def notificaciones():
-    manana = date.today() + timedelta(days=1)
+    hoy, manana, cuotas_urgentes = obtener_cuotas_urgentes()
 
-    cuotas_manana = Cuota.query.filter(
-        Cuota.fecha_vencimiento == manana,
-        Cuota.estado.notin_(["pagada"])
-    ).all()
+    cuotas_manana = [c for c in cuotas_urgentes if c.fecha_vencimiento == manana]
+    cuotas_vencidas = [c for c in cuotas_urgentes if c.fecha_vencimiento <= hoy and c.fecha_vencimiento != manana]
 
-    deudores_map = {}
-    for cuota in cuotas_manana:
-        prestamo = cuota.prestamo
-        deudor = prestamo.deudor
+    def construir_avisos(cuotas):
+        deudores_map = {}
 
-        if deudor.id not in deudores_map:
-            deudores_map[deudor.id] = {
-                "deudor": deudor,
-                "cuotas_manana": [],
-                "monto_cobrar": 0,
-                "cuotas_pendientes": sum(
-                    1 for p in deudor.prestamos
-                    for c in p.cuotas
-                    if c.estado not in ("pagada",)
-                ),
-                "saldo_total": sum(
-                    p.saldo_capital for p in deudor.prestamos
-                )
-            }
+        for cuota in cuotas:
+            prestamo = cuota.prestamo
+            deudor = prestamo.deudor
 
-        deudores_map[deudor.id]["cuotas_manana"].append(cuota)
-        pendiente_cuota = (cuota.capital - cuota.pagado_capital) + (cuota.interes - cuota.pagado_interes)
-        deudores_map[deudor.id]["monto_cobrar"] += pendiente_cuota
+            if deudor.id not in deudores_map:
+                deudores_map[deudor.id] = {
+                    "deudor": deudor,
+                    "cuotas": [],
+                    "monto_cobrar": 0,
+                    "cuotas_pendientes": sum(
+                        1 for p in deudor.prestamos
+                        for c in p.cuotas
+                        if c.estado not in ("pagada",)
+                    ),
+                    "saldo_total": sum(
+                        p.saldo_capital for p in deudor.prestamos
+                    ),
+                    "prioridad": "baja",
+                }
 
-    avisos = list(deudores_map.values())
+            deudores_map[deudor.id]["cuotas"].append(cuota)
+            pendiente_cuota = (cuota.capital - cuota.pagado_capital) + (cuota.interes - cuota.pagado_interes)
+            deudores_map[deudor.id]["monto_cobrar"] += pendiente_cuota
 
-    return render_template("notificaciones.html", avisos=avisos, manana=manana)
+            if cuota.fecha_vencimiento < hoy:
+                deudores_map[deudor.id]["prioridad"] = "alta"
+            elif cuota.fecha_vencimiento == hoy:
+                deudores_map[deudor.id]["prioridad"] = "media"
+            elif cuota.fecha_vencimiento == manana:
+                deudores_map[deudor.id]["prioridad"] = "baja"
+
+        avisos = list(deudores_map.values())
+        avisos.sort(key=lambda aviso: {"alta": 0, "media": 1, "baja": 2}[aviso["prioridad"]])
+        return avisos
+
+    avisos_manana = construir_avisos(cuotas_manana)
+    avisos_vencidas = construir_avisos(cuotas_vencidas)
+
+    return render_template(
+        "notificaciones.html",
+        avisos_manana=avisos_manana,
+        avisos_vencidas=avisos_vencidas,
+        manana=manana,
+        hoy=hoy,
+    )
 
 
 @app.route("/prestamo/refinanciar/<int:prestamo_id>", methods=["GET", "POST"])

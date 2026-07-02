@@ -1386,6 +1386,27 @@ textarea {
     color: #fbbf24;
 }
 
+.notif-priority-label {
+    font-size: 12px;
+    font-weight: 700;
+    margin: 0 0 0.25rem 0;
+}
+
+.notif-priority-alta {
+    border-left: 5px solid #ef4444;
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.15);
+}
+
+.notif-priority-media {
+    border-left: 5px solid #f59e0b;
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.15);
+}
+
+.notif-priority-baja {
+    border-left: 5px solid #3b82f6;
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.15);
+}
+
 /* Light mode overrides */
 .light-mode .notif-card {
     background: #f8fafc;

@@ -8,80 +8,124 @@
 
     <div class="page-header">
         <div>
-            <h1>🔔 Cobros para mañana</h1>
+            <h1>🔔 Cobros pendientes</h1>
             <p>{{ manana.strftime('%A %d de %B de %Y').capitalize() }}</p>
         </div>
     </div>
 
-    {% if avisos %}
+    {% if avisos_manana or avisos_vencidas %}
 
-        <div class="notif-resumen">
-            <div class="metric-card">
-                <span>Deudores a cobrar</span>
-                <h2>{{ avisos | length }}</h2>
-            </div>
-            <div class="metric-card">
-                <span>Total a recaudar mañana</span>
-                <h2 style="color: #34d399;">
-                    ${{ "{:,.0f}".format(avisos | sum(attribute="monto_cobrar")) }}
-                </h2>
+        {% if avisos_manana %}
+        <div class="notif-section">
+            <h2>📅 Cobros para mañana</h2>
+            <div class="notif-lista">
+                {% for aviso in avisos_manana %}
+                <div class="notif-card {% if aviso.prioridad == 'alta' %}notif-priority-alta{% elif aviso.prioridad == 'media' %}notif-priority-media{% else %}notif-priority-baja{% endif %}">
+                    <div class="notif-card-header">
+                        <div>
+                            <h3>{{ aviso.deudor.nombre }}</h3>
+                            <p class="notif-priority-label">
+                                {% if aviso.prioridad == 'alta' %}
+                                    🚨 Muy atrasado
+                                {% elif aviso.prioridad == 'media' %}
+                                    ⚠️ Vence hoy
+                                {% else %}
+                                    📅 Vence mañana
+                                {% endif %}
+                            </p>
+                            {% if aviso.deudor.telefono %}
+                                <p class="notif-telefono">📞 {{ aviso.deudor.telefono }}</p>
+                            {% endif %}
+                        </div>
+                        <a href="{{ url_for('detalle_deudor', deudor_id=aviso.deudor.id) }}" class="btn-small">
+                            Ver detalle
+                        </a>
+                    </div>
+
+                    <div class="notif-card-grid">
+                        <div class="notif-item notif-item-cobrar">
+                            <span>Monto a cobrar mañana</span>
+                            <strong>${{ "{:,.0f}".format(aviso.monto_cobrar) }}</strong>
+                        </div>
+                        <div class="notif-item">
+                            <span>Cuotas pendientes</span>
+                            <strong>{{ aviso.cuotas_pendientes }}</strong>
+                        </div>
+                        <div class="notif-item notif-item-deuda">
+                            <span>Deuda total</span>
+                            <strong>${{ "{:,.0f}".format(aviso.saldo_total) }}</strong>
+                        </div>
+                    </div>
+
+                    {% if aviso.cuotas | length > 1 %}
+                    <p class="notif-multi">
+                        ⚠️ Tiene {{ aviso.cuotas | length }} cuotas pendientes para ese día
+                    </p>
+                    {% endif %}
+                </div>
+                {% endfor %}
             </div>
         </div>
+        {% endif %}
 
-        <div class="notif-lista">
-
-            {% for aviso in avisos %}
-
-            <div class="notif-card">
-
-                <div class="notif-card-header">
-                    <div>
-                        <h3>{{ aviso.deudor.nombre }}</h3>
-                        {% if aviso.deudor.telefono %}
-                            <p class="notif-telefono">📞 {{ aviso.deudor.telefono }}</p>
-                        {% endif %}
+        {% if avisos_vencidas %}
+        <div class="notif-section">
+            <h2>⚠️ Vencidas hoy o atrasadas</h2>
+            <div class="notif-lista">
+                {% for aviso in avisos_vencidas %}
+                <div class="notif-card {% if aviso.prioridad == 'alta' %}notif-priority-alta{% elif aviso.prioridad == 'media' %}notif-priority-media{% else %}notif-priority-baja{% endif %}">
+                    <div class="notif-card-header">
+                        <div>
+                            <h3>{{ aviso.deudor.nombre }}</h3>
+                            <p class="notif-priority-label">
+                                {% if aviso.prioridad == 'alta' %}
+                                    🚨 Muy atrasado
+                                {% elif aviso.prioridad == 'media' %}
+                                    ⚠️ Vence hoy
+                                {% else %}
+                                    📅 Vence mañana
+                                {% endif %}
+                            </p>
+                            {% if aviso.deudor.telefono %}
+                                <p class="notif-telefono">📞 {{ aviso.deudor.telefono }}</p>
+                            {% endif %}
+                        </div>
+                        <a href="{{ url_for('detalle_deudor', deudor_id=aviso.deudor.id) }}" class="btn-small">
+                            Ver detalle
+                        </a>
                     </div>
-                    <a href="{{ url_for('detalle_deudor', deudor_id=aviso.deudor.id) }}" class="btn-small">
-                        Ver detalle
-                    </a>
+
+                    <div class="notif-card-grid">
+                        <div class="notif-item notif-item-cobrar">
+                            <span>Monto vencido o atrasado</span>
+                            <strong>${{ "{:,.0f}".format(aviso.monto_cobrar) }}</strong>
+                        </div>
+                        <div class="notif-item">
+                            <span>Cuotas pendientes</span>
+                            <strong>{{ aviso.cuotas_pendientes }}</strong>
+                        </div>
+                        <div class="notif-item notif-item-deuda">
+                            <span>Deuda total</span>
+                            <strong>${{ "{:,.0f}".format(aviso.saldo_total) }}</strong>
+                        </div>
+                    </div>
+
+                    {% if aviso.cuotas | length > 1 %}
+                    <p class="notif-multi">
+                        ⚠️ Tiene {{ aviso.cuotas | length }} cuotas vencidas o atrasadas
+                    </p>
+                    {% endif %}
                 </div>
-
-                <div class="notif-card-grid">
-
-                    <div class="notif-item notif-item-cobrar">
-                        <span>Monto a cobrar mañana</span>
-                        <strong>${{ "{:,.0f}".format(aviso.monto_cobrar) }}</strong>
-                    </div>
-
-                    <div class="notif-item">
-                        <span>Cuotas pendientes</span>
-                        <strong>{{ aviso.cuotas_pendientes }}</strong>
-                    </div>
-
-                    <div class="notif-item notif-item-deuda">
-                        <span>Deuda total</span>
-                        <strong>${{ "{:,.0f}".format(aviso.saldo_total) }}</strong>
-                    </div>
-
-                </div>
-
-                {% if aviso.cuotas_manana | length > 1 %}
-                <p class="notif-multi">
-                    ⚠️ Tiene {{ aviso.cuotas_manana | length }} cuotas venciendo mañana (de distintos préstamos)
-                </p>
-                {% endif %}
-
+                {% endfor %}
             </div>
-
-            {% endfor %}
-
         </div>
+        {% endif %}
 
     {% else %}
 
         <div class="empty-state">
-            <h2>Sin cobros para mañana</h2>
-            <p>No hay cuotas que venzan el {{ manana.strftime('%d/%m/%Y') }}.</p>
+            <h2>Sin cobros pendientes</h2>
+            <p>No hay cuotas que venzan hoy, mañana o con atraso.</p>
         </div>
 
     {% endif %}
