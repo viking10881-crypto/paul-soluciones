@@ -4,9 +4,19 @@ from calendar import monthrange
 from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import text
 from dotenv import load_dotenv
 
-from models import db, Usuario, Deudor, Prestamo, Cuota, Pago
+from models import (
+    db,
+    Usuario,
+    Deudor,
+    Prestamo,
+    Cuota,
+    Pago,
+    CuentaContable,
+    CuentaMovimiento,
+)
 
 load_dotenv()
 
@@ -76,6 +86,77 @@ def crear_admin():
         print("✅ Usuario admin creado: admin / admin123")
 
 
+def asegurar_esquema():
+    db.create_all()
+
+    dialect = db.engine.dialect.name
+
+    with db.engine.connect() as conn:
+        if dialect == "sqlite":
+            result = conn.execute(text("PRAGMA table_info(prestamos)"))
+            prestamos_cols = [row[1] for row in result.fetchall()]
+            if "cuenta_desembolso_id" not in prestamos_cols:
+                conn.execute(text("ALTER TABLE prestamos ADD COLUMN cuenta_desembolso_id INTEGER"))
+
+            result = conn.execute(text("PRAGMA table_info(pagos)"))
+            pagos_cols = [row[1] for row in result.fetchall()]
+            if "cuenta_destino_id" not in pagos_cols:
+                conn.execute(text("ALTER TABLE pagos ADD COLUMN cuenta_destino_id INTEGER"))
+
+            result = conn.execute(text("PRAGMA table_info(cuenta_movimientos)"))
+            movimientos_cols = [row[1] for row in result.fetchall()]
+            if "prestamo_id" not in movimientos_cols:
+                conn.execute(text("ALTER TABLE cuenta_movimientos ADD COLUMN prestamo_id INTEGER"))
+            if "pago_id" not in movimientos_cols:
+                conn.execute(text("ALTER TABLE cuenta_movimientos ADD COLUMN pago_id INTEGER"))
+
+            conn.execute(text("PRAGMA foreign_keys = ON"))
+            conn.commit()
+
+        elif dialect in ("postgresql", "postgres"):
+            result = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'prestamos' AND column_name = 'cuenta_desembolso_id'"
+            ))
+            if result.fetchone() is None:
+                conn.execute(text(
+                    "ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS cuenta_desembolso_id INTEGER"
+                ))
+
+            result = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'pagos' AND column_name = 'cuenta_destino_id'"
+            ))
+            if result.fetchone() is None:
+                conn.execute(text(
+                    "ALTER TABLE pagos ADD COLUMN IF NOT EXISTS cuenta_destino_id INTEGER"
+                ))
+
+            result = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'cuenta_movimientos' AND column_name = 'prestamo_id'"
+            ))
+            if result.fetchone() is None:
+                conn.execute(text(
+                    "ALTER TABLE cuenta_movimientos ADD COLUMN IF NOT EXISTS prestamo_id INTEGER"
+                ))
+
+            result = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'cuenta_movimientos' AND column_name = 'pago_id'"
+            ))
+            if result.fetchone() is None:
+                conn.execute(text(
+                    "ALTER TABLE cuenta_movimientos ADD COLUMN IF NOT EXISTS pago_id INTEGER"
+                ))
+
+            conn.commit()
+
+        else:
+            # Otros motores de base de datos pueden no necesitar alteraciones explícitas.
+            pass
+
+
 def actualizar_cuotas_vencidas():
     hoy = date.today()
 
@@ -114,6 +195,43 @@ def recalcular_prestamo(prestamo):
             for c in prestamo.cuotas
         )
         prestamo.estado = "atrasado" if tiene_vencidas else "activo"
+
+
+def obtener_cuentas_contables():
+    caja = CuentaContable.query.filter_by(slug="caja_menor").first()
+    banco = CuentaContable.query.filter_by(slug="banco").first()
+
+    if not caja:
+        caja = CuentaContable(nombre="Caja menor", slug="caja_menor", saldo=0.0)
+        db.session.add(caja)
+
+    if not banco:
+        banco = CuentaContable(nombre="Banco", slug="banco", saldo=0.0)
+        db.session.add(banco)
+
+    if not caja.id or not banco.id:
+        db.session.commit()
+
+    return [caja, banco]
+
+
+def obtener_cuenta(slug):
+    return CuentaContable.query.filter_by(slug=slug).first()
+
+
+def ajustar_saldo_cuenta(cuenta, monto, descripcion, tipo, prestamo_id=None, pago_id=None):
+    cuenta.saldo = (cuenta.saldo or 0) + monto
+
+    movimiento = CuentaMovimiento(
+        cuenta_id=cuenta.id,
+        prestamo_id=prestamo_id,
+        pago_id=pago_id,
+        tipo=tipo,
+        monto=monto,
+        descripcion=descripcion,
+    )
+
+    db.session.add(movimiento)
 
 
 @app.route("/")
@@ -182,6 +300,8 @@ def dashboard():
         estado="atrasado"
     ).count()
 
+    caja, banco = obtener_cuentas_contables()
+
     return render_template(
         "dashboard.html",
         deudores=deudores,
@@ -191,8 +311,39 @@ def dashboard():
         intereses_ganados=intereses_ganados,
         prestamos_activos=prestamos_activos,
         prestamos_pagados=prestamos_pagados,
-        prestamos_atrasados=prestamos_atrasados
+        prestamos_atrasados=prestamos_atrasados,
+        caja=caja,
+        banco=banco
     )
+
+
+@app.route("/cuentas", methods=["GET", "POST"])
+@login_required
+def cuentas():
+    cuentas = obtener_cuentas_contables()
+
+    if request.method == "POST":
+        cuenta_id = int(request.form.get("cuenta_id"))
+        monto = float(request.form.get("monto"))
+        descripcion = request.form.get("descripcion") or "Inyección de capital"
+
+        if monto <= 0:
+            flash("El monto debe ser mayor a cero.", "error")
+            return redirect(url_for("cuentas"))
+
+        cuenta = CuentaContable.query.get_or_404(cuenta_id)
+        ajustar_saldo_cuenta(
+            cuenta,
+            monto,
+            descripcion,
+            "inyeccion"
+        )
+        db.session.commit()
+
+        flash(f"Se agregó ${monto:,.0f} a {cuenta.nombre}.", "success")
+        return redirect(url_for("cuentas"))
+
+    return render_template("cuentas.html", cuentas=cuentas)
 
 
 @app.route("/deudores")
@@ -264,12 +415,59 @@ def eliminar_deudor(deudor_id):
 @login_required
 def nuevo_prestamo(deudor_id):
     deudor = Deudor.query.get_or_404(deudor_id)
+    cuentas = obtener_cuentas_contables()
 
     if request.method == "POST":
         monto = float(request.form.get("monto"))
         numero_cuotas = int(request.form.get("numero_cuotas"))
         dia_pago = int(request.form.get("dia_pago"))
         interes_mensual = float(request.form.get("interes_mensual", 7.0))
+        monto_caja = float(request.form.get("monto_caja_menor") or 0)
+        monto_banco = float(request.form.get("monto_banco") or 0)
+        cuenta_slug = request.form.get("cuenta_desembolso") or "caja_menor"
+
+        if monto <= 0:
+            flash("El monto del préstamo debe ser mayor a cero.", "error")
+            return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+
+        if monto_caja < 0 or monto_banco < 0:
+            flash("Los montos de origen no pueden ser negativos.", "error")
+            return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+
+        sources = []
+        total_fuentes = monto_caja + monto_banco
+
+        if total_fuentes == 0:
+            cuenta = obtener_cuenta(cuenta_slug)
+
+            if not cuenta:
+                flash("Selecciona una cuenta válida para el desembolso.", "error")
+                return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+
+            sources = [(cuenta, monto)]
+        else:
+            if abs(total_fuentes - monto) > 0.01:
+                flash("La suma de los orígenes debe ser igual al monto total del préstamo.", "error")
+                return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+
+            if monto_caja > 0:
+                caja = obtener_cuenta("caja_menor")
+                if not caja:
+                    flash("No se encontró la cuenta Caja menor.", "error")
+                    return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+                sources.append((caja, monto_caja))
+
+            if monto_banco > 0:
+                banco = obtener_cuenta("banco")
+                if not banco:
+                    flash("No se encontró la cuenta Banco.", "error")
+                    return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+                sources.append((banco, monto_banco))
+
+        for cuenta, cantidad in sources:
+            if cuenta.saldo < cantidad:
+                flash(f"Saldo insuficiente en {cuenta.nombre}: disponible ${cuenta.saldo:,.0f}.", "error")
+                return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
 
         prestamo = Prestamo(
             deudor_id=deudor.id,
@@ -278,10 +476,21 @@ def nuevo_prestamo(deudor_id):
             numero_cuotas=numero_cuotas,
             dia_pago=dia_pago,
             saldo_capital=monto,
-            estado="activo"
+            estado="activo",
+            cuenta_desembolso_id=sources[0][0].id if len(sources) == 1 else None
         )
 
         db.session.add(prestamo)
+        db.session.commit()
+
+        for cuenta, cantidad in sources:
+            ajustar_saldo_cuenta(
+                cuenta,
+                -cantidad,
+                f"Desembolso préstamo #{prestamo.id}",
+                "desembolso",
+                prestamo_id=prestamo.id
+            )
         db.session.commit()
 
         capital_cuota = monto / numero_cuotas
@@ -317,7 +526,7 @@ def nuevo_prestamo(deudor_id):
         flash("Préstamo creado correctamente con cuotas mensuales", "success")
         return redirect(url_for("detalle_deudor", deudor_id=deudor.id))
 
-    return render_template("nuevo_prestamo.html", deudor=deudor)
+    return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
 
 
 @app.route("/pago/cuota/<int:cuota_id>", methods=["POST"])
@@ -329,6 +538,12 @@ def pagar_cuota(cuota_id):
     tipo_pago = request.form.get("tipo_pago")
     monto = float(request.form.get("monto"))
     nota = request.form.get("nota")
+    cuenta_slug = request.form.get("cuenta_destino") or "caja_menor"
+    cuenta_destino = obtener_cuenta(cuenta_slug)
+
+    if not cuenta_destino:
+        flash("Selecciona una cuenta destino válida para este pago.", "error")
+        return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
 
     capital_pagado = 0
     interes_pagado = 0
@@ -414,10 +629,21 @@ def pagar_cuota(cuota_id):
         monto=monto,
         capital_pagado=capital_pagado,
         interes_pagado=interes_pagado,
-        nota=nota
+        nota=nota,
+        cuenta_destino_id=cuenta_destino.id
     )
 
     db.session.add(pago)
+    db.session.flush()
+
+    ajustar_saldo_cuenta(
+        cuenta_destino,
+        monto,
+        f"Pago de préstamo #{prestamo.id}",
+        "deposito",
+        prestamo_id=prestamo.id,
+        pago_id=pago.id
+    )
 
     # Recalcular saldo y estado del préstamo desde cero
     recalcular_prestamo(prestamo)
@@ -487,7 +713,8 @@ def detalle_prestamo(prestamo_id):
         "detalle_prestamo.html",
         prestamo=prestamo,
         cuotas=cuotas,
-        pagos=pagos
+        pagos=pagos,
+        cuentas=obtener_cuentas_contables()
     )
 
 
@@ -621,7 +848,7 @@ def editar_prestamo(prestamo_id):
         flash("Préstamo actualizado y saldos recalculados correctamente", "success")
         return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
 
-    return render_template("nuevo_prestamo.html", deudor=prestamo.deudor, prestamo=prestamo)
+    return render_template("nuevo_prestamo.html", deudor=prestamo.deudor, prestamo=prestamo, cuentas=obtener_cuentas_contables())
 
 
 @app.route("/notificaciones")
@@ -784,7 +1011,7 @@ def eliminar_prestamo(prestamo_id):
 
 if __name__ == "__main__":
     with app.app_context():
-        db.create_all()
+        asegurar_esquema()
         crear_admin()
 
     app.run(debug=True)

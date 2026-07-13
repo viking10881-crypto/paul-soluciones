@@ -182,6 +182,18 @@
                                     </div>
 
                                     <div class="form-group">
+                                        <label>Cuenta destino</label>
+
+                                        <select name="cuenta_destino" required>
+                                            {% for cuenta in cuentas %}
+                                            <option value="{{ cuenta.slug }}">
+                                                {{ cuenta.nombre }} - ${{ "{:,.0f}".format(cuenta.saldo) }}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group">
                                         <label>Nota</label>
 
                                         <input type="text"

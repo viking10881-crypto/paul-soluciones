@@ -53,6 +53,41 @@
                     >
                 </div>
 
+                <div class="form-group">
+                    <label>Cuenta de desembolso</label>
+                    <div class="split-origins">
+                        <div>
+                            <label>Caja menor</label>
+                            <input type="number" name="monto_caja_menor" id="monto_caja_menor" step="0.01" min="0" placeholder="0" value="0">
+                        </div>
+                        <div>
+                            <label>Banco</label>
+                            <input type="number" name="monto_banco" id="monto_banco" step="0.01" min="0" placeholder="0" value="0">
+                        </div>
+                    </div>
+                    <small>Dejar ambos en 0 para seleccionar una sola cuenta tradicional.</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Total origen</label>
+                    <input type="text" id="total_origen" readonly value="$0">
+                    <small id="origen_error" style="display:none;color:#dc2626;">La suma de caja y banco debe ser igual al monto prestado.</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Cuenta tradicional (opcional)</label>
+                    <select name="cuenta_desembolso" id="cuenta_desembolso">
+                        <option value="">Usar origen mixto</option>
+                        {% for cuenta in cuentas %}
+                        <option value="{{ cuenta.slug }}"
+                            {% if prestamo and prestamo.cuenta_desembolso_id == cuenta.id %}selected{% endif %}
+                        >
+                            {{ cuenta.nombre }} - ${{ "{:,.0f}".format(cuenta.saldo) }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
             </div>
 
             <div class="simulator-card">
@@ -117,12 +152,48 @@ function calcularPreview() {
     cuotaPreview.textContent   = formatoCOP(cuota);
 }
 
-montoInput.addEventListener("input", calcularPreview);
+const montoCajaInput = document.getElementById("monto_caja_menor");
+const montoBancoInput = document.getElementById("monto_banco");
+const totalOrigen = document.getElementById("total_origen");
+const origenError = document.getElementById("origen_error");
+const cuentaDesembolsoSelect = document.getElementById("cuenta_desembolso");
+
+function actualizarOrigen() {
+    const monto = parseFloat(montoInput.value) || 0;
+    const montoCaja = parseFloat(montoCajaInput.value) || 0;
+    const montoBanco = parseFloat(montoBancoInput.value) || 0;
+    const total = montoCaja + montoBanco;
+
+    totalOrigen.value = new Intl.NumberFormat("es-CO", {
+        style: "currency",
+        currency: "COP",
+        maximumFractionDigits: 0
+    }).format(total);
+
+    if (total > 0) {
+        cuentaDesembolsoSelect.value = "";
+    }
+
+    if (total > 0 && Math.abs(total - monto) > 0.01) {
+        origenError.style.display = "block";
+    } else {
+        origenError.style.display = "none";
+    }
+}
+
+montoCajaInput.addEventListener("input", actualizarOrigen);
+montoBancoInput.addEventListener("input", actualizarOrigen);
+
+montoInput.addEventListener("input", () => {
+    calcularPreview();
+    actualizarOrigen();
+});
 cuotasInput.addEventListener("input", calcularPreview);
 interesInput.addEventListener("input", calcularPreview);
 
 // calcula al cargar con el valor por defecto
 calcularPreview();
+actualizarOrigen();
 </script>
 
 {% endblock %}

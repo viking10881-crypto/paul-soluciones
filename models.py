@@ -15,6 +15,36 @@ class Usuario(db.Model, UserMixin):
     creado_en = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class CuentaContable(db.Model):
+    __tablename__ = "cuentas_contables"
+
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(100), nullable=False)
+    slug = db.Column(db.String(50), nullable=False, unique=True)
+    saldo = db.Column(db.Float, default=0.0, nullable=False)
+    creado_en = db.Column(db.DateTime, default=datetime.utcnow)
+
+    movimientos = db.relationship(
+        "CuentaMovimiento",
+        backref="cuenta",
+        lazy=True,
+        cascade="all, delete-orphan"
+    )
+
+
+class CuentaMovimiento(db.Model):
+    __tablename__ = "cuenta_movimientos"
+
+    id = db.Column(db.Integer, primary_key=True)
+    cuenta_id = db.Column(db.Integer, db.ForeignKey("cuentas_contables.id"), nullable=False)
+    prestamo_id = db.Column(db.Integer, db.ForeignKey("prestamos.id"), nullable=True)
+    pago_id = db.Column(db.Integer, db.ForeignKey("pagos.id"), nullable=True)
+    tipo = db.Column(db.String(50), nullable=False)
+    monto = db.Column(db.Float, nullable=False)
+    descripcion = db.Column(db.String(200))
+    fecha = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class Deudor(db.Model):
     __tablename__ = "deudores"
 
@@ -43,6 +73,7 @@ class Prestamo(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     deudor_id = db.Column(db.Integer, db.ForeignKey("deudores.id"), nullable=False)
+    cuenta_desembolso_id = db.Column(db.Integer, db.ForeignKey("cuentas_contables.id"), nullable=True)
 
     monto = db.Column(db.Float, nullable=False)
     interes_mensual = db.Column(db.Float, default=7.0)
@@ -69,6 +100,12 @@ class Prestamo(db.Model):
         backref="prestamo",
         lazy=True,
         cascade="all, delete-orphan"
+    )
+
+    cuenta_desembolso = db.relationship(
+        "CuentaContable",
+        backref="prestamos_desembolsados",
+        foreign_keys=[cuenta_desembolso_id]
     )
 
 
@@ -109,6 +146,7 @@ class Pago(db.Model):
 
     prestamo_id = db.Column(db.Integer, db.ForeignKey("prestamos.id"), nullable=False)
     cuota_id = db.Column(db.Integer, db.ForeignKey("cuotas.id"), nullable=True)
+    cuenta_destino_id = db.Column(db.Integer, db.ForeignKey("cuentas_contables.id"), nullable=True)
 
     tipo_pago = db.Column(db.String(50), nullable=False)
     # cuota_completa, solo_interes, abono_capital, abono_parcial
@@ -121,3 +159,9 @@ class Pago(db.Model):
     nota = db.Column(db.Text)
 
     fecha_pago = db.Column(db.DateTime, default=datetime.utcnow)
+
+    cuenta_destino = db.relationship(
+        "CuentaContable",
+        backref="pagos_recibidos",
+        foreign_keys=[cuenta_destino_id]
+    )
