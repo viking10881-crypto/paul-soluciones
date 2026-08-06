@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 import pytest
+from werkzeug.security import generate_password_hash
 
 from app import app, db, Usuario, Deudor, Prestamo, Cuota
 
@@ -16,12 +17,14 @@ def client():
         user = Usuario(
             nombre="Administrador",
             usuario="admin",
-            password_hash="dummy",
+            password_hash=generate_password_hash("dummy"),
+            rol="admin",
+            activo=True,
         )
         db.session.add(user)
         db.session.commit()
 
-        deudor = Deudor(nombre="Test", telefono="111", referencia="x", nota="y")
+        deudor = Deudor(nombre="Test", telefono="111", referencia="x", nota="y", usuario_id=user.id)
         db.session.add(deudor)
         db.session.commit()
 

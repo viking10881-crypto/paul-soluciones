@@ -8,7 +8,7 @@
 
     <div class="dashboard-header">
         <h1>Dashboard Financiero</h1>
-        <p>Control total de préstamos y deudores</p>
+        <p>{% if current_user.es_admin %}Vista general de toda la operación{% else %}Resumen de tu cartera y tus actividades{% endif %}</p>
     </div>
 
     <div class="cards-grid">
@@ -54,6 +54,31 @@
         </div>
 
     </div>
+
+    {% if current_user.es_admin %}
+    <div class="page-header admin-activity-header">
+        <div><h2>Actividad de prestamistas</h2><p>Estado consolidado de cada cartera</p></div>
+        <a href="{{ url_for('prestamistas') }}" class="btn-small">Administrar prestamistas</a>
+    </div>
+    <div class="table-card">
+        <table>
+            <thead><tr><th>Prestamista</th><th>Clientes</th><th>Préstamos</th><th>Total prestado</th><th>Capital pendiente</th><th>Recaudado</th><th>Atrasados</th><th></th></tr></thead>
+            <tbody>
+            {% for resumen in prestamistas_resumen %}
+                <tr>
+                    <td><strong>{{ resumen.usuario.nombre }}</strong><br><small>{{ resumen.usuario.usuario }}</small></td>
+                    <td>{{ resumen.clientes }}</td><td>{{ resumen.prestamos }}</td>
+                    <td>${{ "{:,.0f}".format(resumen.total_prestado) }}</td>
+                    <td>${{ "{:,.0f}".format(resumen.capital_pendiente) }}</td>
+                    <td>${{ "{:,.0f}".format(resumen.total_recaudado) }}</td>
+                    <td>{{ resumen.atrasados }}</td>
+                    <td><a href="{{ url_for('detalle_prestamista', usuario_id=resumen.usuario.id) }}" class="btn-small">Ver detalle</a></td>
+                </tr>
+            {% else %}<tr><td colspan="8">Todavía no hay prestamistas registrados.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
 
     <div class="charts-grid">
 

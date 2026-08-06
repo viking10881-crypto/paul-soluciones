@@ -133,6 +133,7 @@
                        </a>
 
                        <form method="POST" action="{{ url_for('eliminar_prestamo', prestamo_id=prestamo.id) }}" style="display:inline" onsubmit="return confirm('¿Eliminar este préstamo y todas sus cuotas/pagos?');">
+                           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                            <button type="submit" class="btn-small btn-danger">Eliminar</button>
                        </form>
                     </div>

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ prestamista.nombre }} | Prestamistas{% endblock %}
+{% block content %}
+<section class="page-section">
+    <div class="page-header">
+        <div>
+            <h1>{{ prestamista.nombre }}</h1>
+            <p>Usuario: {{ prestamista.usuario }} · {{ "Activo" if prestamista.activo else "Inactivo" }}</p>
+        </div>
+        <div>
+            <a href="{{ url_for('editar_prestamista', usuario_id=prestamista.id) }}" class="btn-small">Editar acceso</a>
+            <a href="{{ url_for('prestamistas') }}" class="btn-small">← Volver</a>
+        </div>
+    </div>
+
+    <div class="cards-grid">
+        <div class="metric-card"><span>Clientes</span><h2>{{ metricas.clientes }}</h2></div>
+        <div class="metric-card"><span>Préstamos</span><h2>{{ metricas.prestamos }}</h2></div>
+        <div class="metric-card"><span>Total prestado</span><h2>${{ "{:,.0f}".format(metricas.total_prestado) }}</h2></div>
+        <div class="metric-card"><span>Capital pendiente</span><h2>${{ "{:,.0f}".format(metricas.capital_pendiente) }}</h2></div>
+        <div class="metric-card"><span>Total recaudado</span><h2>${{ "{:,.0f}".format(metricas.total_recaudado) }}</h2></div>
+        <div class="metric-card"><span>Intereses ganados</span><h2>${{ "{:,.0f}".format(metricas.intereses) }}</h2></div>
+        <div class="metric-card"><span>Préstamos atrasados</span><h2>{{ metricas.atrasados }}</h2></div>
+        {% for cuenta in cuentas %}<div class="metric-card"><span>{{ cuenta.nombre }}</span><h2>${{ "{:,.0f}".format(cuenta.saldo) }}</h2></div>{% endfor %}
+    </div>
+
+    <div class="page-header admin-activity-header"><div><h2>Clientes registrados</h2><p>Cartera administrada por este prestamista</p></div></div>
+    <div class="table-card"><table>
+        <thead><tr><th>Cliente</th><th>Teléfono</th><th>Referencia</th><th>Préstamos</th><th>Saldo pendiente</th><th>Estado</th><th></th></tr></thead>
+        <tbody>{% for cliente in clientes %}
+            {% set saldo = cliente.prestamos|sum(attribute='saldo_capital') %}
+            <tr>
+                <td>{{ cliente.nombre }}</td><td>{{ cliente.telefono or '—' }}</td><td>{{ cliente.referencia or '—' }}</td>
+                <td>{{ cliente.prestamos|length }}</td><td>${{ "{:,.0f}".format(saldo) }}</td>
+                <td>{% if cliente.prestamos|selectattr('estado','equalto','atrasado')|list %}Atrasado{% elif saldo > 0 %}Activo{% else %}Paz y salvo{% endif %}</td>
+                <td><a href="{{ url_for('detalle_deudor', deudor_id=cliente.id) }}" class="btn-small">Ver cliente</a></td>
+            </tr>
+        {% else %}<tr><td colspan="7">Este prestamista todavía no tiene clientes.</td></tr>{% endfor %}</tbody>
+    </table></div>
+</section>
+{% endblock %}

@@ -20,6 +20,7 @@
     <div class="form-card">
 
         <form method="POST" {% if deudor %}action="{{ url_for('editar_deudor', deudor_id=deudor.id) }}"{% endif %}>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
             <div class="form-grid">
 
@@ -56,4 +57,3 @@
 </section>                                                                                                                                                                                  
 
 {% endblock %}                                                              
-    

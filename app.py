@@ -1,7 +1,11 @@
 import os
+import hmac
+import secrets
+from functools import wraps
+from types import SimpleNamespace
 from datetime import date, timedelta
 from calendar import monthrange
-from flask import Flask, render_template, redirect, url_for, request, flash
+from flask import Flask, render_template, redirect, url_for, request, flash, abort, session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import text
@@ -22,9 +26,13 @@ load_dotenv()
 
 app = Flask(__name__)
 
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "clave-secreta-dev")
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY") or secrets.token_hex(32)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///prestamos_paul.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
 
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
@@ -40,17 +48,92 @@ login_manager.init_app(app)
 login_manager.login_view = "login"
 login_manager.login_message = "Debes iniciar sesión para continuar."
 
+_esquema_preparado = False
+
+
+def csrf_token():
+    if "_csrf_token" not in session:
+        session["_csrf_token"] = secrets.token_urlsafe(32)
+    return session["_csrf_token"]
+
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+@app.before_request
+def validar_csrf():
+    if app.config.get("TESTING"):
+        return
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        esperado = session.get("_csrf_token", "")
+        recibido = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
+        if not esperado or not hmac.compare_digest(esperado, recibido):
+            abort(400, description="La sesión del formulario venció. Recarga la página e inténtalo nuevamente.")
+
+
+@app.after_request
+def agregar_cabeceras_seguridad(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if app.config["SESSION_COOKIE_SECURE"]:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
 
 @login_manager.user_loader
 def load_user(user_id):
     return Usuario.query.get(int(user_id))
 
 
+def admin_required(view):
+    @wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if not current_user.es_admin:
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def deudor_visible_o_404(deudor_id):
+    query = Deudor.query.filter_by(id=deudor_id)
+    if not current_user.es_admin:
+        query = query.filter_by(usuario_id=current_user.id)
+    return query.first_or_404()
+
+
+def prestamo_visible_o_404(prestamo_id):
+    query = Prestamo.query.join(Deudor).filter(Prestamo.id == prestamo_id)
+    if not current_user.es_admin:
+        query = query.filter(Deudor.usuario_id == current_user.id)
+    return query.first_or_404()
+
+
+def cuota_visible_o_404(cuota_id):
+    query = Cuota.query.join(Prestamo).join(Deudor).filter(Cuota.id == cuota_id)
+    if not current_user.es_admin:
+        query = query.filter(Deudor.usuario_id == current_user.id)
+    return query.first_or_404()
+
+
+def pago_visible_o_404(pago_id):
+    query = Pago.query.join(Prestamo).join(Deudor).filter(Pago.id == pago_id)
+    if not current_user.es_admin:
+        query = query.filter(Deudor.usuario_id == current_user.id)
+    return query.first_or_404()
+
+
 def obtener_cuotas_urgentes():
     hoy = date.today()
     manana = hoy + timedelta(days=1)
 
-    cuotas_urgentes = Cuota.query.filter(
+    query = Cuota.query.join(Prestamo).join(Deudor)
+    if not current_user.es_admin:
+        query = query.filter(Deudor.usuario_id == current_user.id)
+
+    cuotas_urgentes = query.filter(
         Cuota.estado.notin_(["pagada"]),
         (
             (Cuota.fecha_vencimiento == manana) |
@@ -77,14 +160,28 @@ def crear_admin():
         nuevo_admin = Usuario(
             nombre="Administrador",
             usuario="admin",
-            password_hash=generate_password_hash("admin123")
+            password_hash=generate_password_hash("admin123"),
+            rol="admin",
+            activo=True,
         )
 
         db.session.add(nuevo_admin)
         db.session.commit()
 
         print("✅ Usuario admin creado: admin / admin123")
+    else:
+        admin.rol = "admin"
+        admin.activo = True
+        db.session.commit()
 
+
+def asignar_datos_existentes_al_admin():
+    admin = Usuario.query.filter_by(usuario="admin").first()
+    if not admin:
+        return
+    Deudor.query.filter(Deudor.usuario_id.is_(None)).update({"usuario_id": admin.id})
+    CuentaContable.query.filter(CuentaContable.usuario_id.is_(None)).update({"usuario_id": admin.id})
+    db.session.commit()
 
 def asegurar_esquema():
     db.create_all()
@@ -93,6 +190,23 @@ def asegurar_esquema():
 
     with db.engine.connect() as conn:
         if dialect == "sqlite":
+            result = conn.execute(text("PRAGMA table_info(usuarios)"))
+            usuarios_cols = [row[1] for row in result.fetchall()]
+            if "rol" not in usuarios_cols:
+                conn.execute(text("ALTER TABLE usuarios ADD COLUMN rol VARCHAR(20) NOT NULL DEFAULT 'prestamista'"))
+            if "activo" not in usuarios_cols:
+                conn.execute(text("ALTER TABLE usuarios ADD COLUMN activo BOOLEAN NOT NULL DEFAULT 1"))
+
+            result = conn.execute(text("PRAGMA table_info(deudores)"))
+            deudores_cols = [row[1] for row in result.fetchall()]
+            if "usuario_id" not in deudores_cols:
+                conn.execute(text("ALTER TABLE deudores ADD COLUMN usuario_id INTEGER"))
+
+            result = conn.execute(text("PRAGMA table_info(cuentas_contables)"))
+            cuentas_cols = [row[1] for row in result.fetchall()]
+            if "usuario_id" not in cuentas_cols:
+                conn.execute(text("ALTER TABLE cuentas_contables ADD COLUMN usuario_id INTEGER"))
+
             result = conn.execute(text("PRAGMA table_info(prestamos)"))
             prestamos_cols = [row[1] for row in result.fetchall()]
             if "cuenta_desembolso_id" not in prestamos_cols:
@@ -114,6 +228,10 @@ def asegurar_esquema():
             conn.commit()
 
         elif dialect in ("postgresql", "postgres"):
+            conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS rol VARCHAR(20) NOT NULL DEFAULT 'prestamista'"))
+            conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT TRUE"))
+            conn.execute(text("ALTER TABLE deudores ADD COLUMN IF NOT EXISTS usuario_id INTEGER"))
+            conn.execute(text("ALTER TABLE cuentas_contables ADD COLUMN IF NOT EXISTS usuario_id INTEGER"))
             result = conn.execute(text(
                 "SELECT column_name FROM information_schema.columns "
                 "WHERE table_name = 'prestamos' AND column_name = 'cuenta_desembolso_id'"
@@ -157,10 +275,24 @@ def asegurar_esquema():
             pass
 
 
+@app.before_request
+def preparar_base_de_datos():
+    """Aplica las ampliaciones de esquema también al ejecutar con Gunicorn."""
+    global _esquema_preparado
+    if not _esquema_preparado:
+        asegurar_esquema()
+        crear_admin()
+        asignar_datos_existentes_al_admin()
+        _esquema_preparado = True
+
+
 def actualizar_cuotas_vencidas():
     hoy = date.today()
 
-    cuotas_vencidas = Cuota.query.filter(
+    query = Cuota.query.join(Prestamo).join(Deudor)
+    if current_user.is_authenticated and not current_user.es_admin:
+        query = query.filter(Deudor.usuario_id == current_user.id)
+    cuotas_vencidas = query.filter(
         Cuota.fecha_vencimiento < hoy,
         Cuota.estado.in_(["pendiente", "parcial", "solo_interes"])
     ).all()
@@ -197,16 +329,18 @@ def recalcular_prestamo(prestamo):
         prestamo.estado = "atrasado" if tiene_vencidas else "activo"
 
 
-def obtener_cuentas_contables():
-    caja = CuentaContable.query.filter_by(slug="caja_menor").first()
-    banco = CuentaContable.query.filter_by(slug="banco").first()
+def obtener_cuentas_contables(usuario=None):
+    usuario = usuario or current_user
+    sufijo = "" if usuario.es_admin else f"_{usuario.id}"
+    caja = CuentaContable.query.filter_by(usuario_id=usuario.id, slug=f"caja_menor{sufijo}").first()
+    banco = CuentaContable.query.filter_by(usuario_id=usuario.id, slug=f"banco{sufijo}").first()
 
     if not caja:
-        caja = CuentaContable(nombre="Caja menor", slug="caja_menor", saldo=0.0)
+        caja = CuentaContable(nombre="Caja menor", slug=f"caja_menor{sufijo}", saldo=0.0, usuario_id=usuario.id)
         db.session.add(caja)
 
     if not banco:
-        banco = CuentaContable(nombre="Banco", slug="banco", saldo=0.0)
+        banco = CuentaContable(nombre="Banco", slug=f"banco{sufijo}", saldo=0.0, usuario_id=usuario.id)
         db.session.add(banco)
 
     if not caja.id or not banco.id:
@@ -215,8 +349,13 @@ def obtener_cuentas_contables():
     return [caja, banco]
 
 
-def obtener_cuenta(slug):
-    return CuentaContable.query.filter_by(slug=slug).first()
+def obtener_cuenta(slug, usuario=None):
+    usuario = usuario or current_user
+    cuenta = CuentaContable.query.filter_by(usuario_id=usuario.id, slug=slug).first()
+    if cuenta:
+        return cuenta
+    sufijo = "" if usuario.es_admin else f"_{usuario.id}"
+    return CuentaContable.query.filter_by(usuario_id=usuario.id, slug=f"{slug}{sufijo}").first()
 
 
 def ajustar_saldo_cuenta(cuenta, monto, descripcion, tipo, prestamo_id=None, pago_id=None):
@@ -252,7 +391,7 @@ def login():
 
         user = Usuario.query.filter_by(usuario=usuario).first()
 
-        if user and check_password_hash(user.password_hash, password):
+        if user and user.activo and check_password_hash(user.password_hash, password):
             login_user(user)
             return redirect(url_for("dashboard"))
 
@@ -261,11 +400,38 @@ def login():
     return render_template("login.html")
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 @login_required
 def logout():
     logout_user()
+    session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/perfil/seguridad", methods=["GET", "POST"])
+@login_required
+def seguridad_perfil():
+    if request.method == "POST":
+        actual = request.form.get("password_actual") or ""
+        nueva = request.form.get("password_nueva") or ""
+        confirmacion = request.form.get("password_confirmacion") or ""
+
+        if not check_password_hash(current_user.password_hash, actual):
+            flash("La contraseña actual no es correcta.", "error")
+        elif len(nueva) < 10:
+            flash("La contraseña nueva debe tener al menos 10 caracteres.", "error")
+        elif nueva != confirmacion:
+            flash("La confirmación no coincide con la contraseña nueva.", "error")
+        elif nueva == actual:
+            flash("La contraseña nueva debe ser diferente de la actual.", "error")
+        else:
+            current_user.password_hash = generate_password_hash(nueva)
+            db.session.commit()
+            session.clear()
+            flash("Contraseña actualizada. Inicia sesión nuevamente.", "success")
+            return redirect(url_for("login"))
+
+    return render_template("seguridad_perfil.html")
 
 
 @app.route("/dashboard")
@@ -274,11 +440,17 @@ def dashboard():
 
     actualizar_cuotas_vencidas()
 
-    deudores = Deudor.query.count()
+    deudores_query = Deudor.query
+    prestamos_query = Prestamo.query.join(Deudor)
+    pagos_query = Pago.query.join(Prestamo).join(Deudor)
+    if not current_user.es_admin:
+        deudores_query = deudores_query.filter(Deudor.usuario_id == current_user.id)
+        prestamos_query = prestamos_query.filter(Deudor.usuario_id == current_user.id)
+        pagos_query = pagos_query.filter(Deudor.usuario_id == current_user.id)
 
-    prestamos = Prestamo.query.all()
-
-    pagos = Pago.query.all()
+    deudores = deudores_query.count()
+    prestamos = prestamos_query.all()
+    pagos = pagos_query.all()
 
     total_prestado = sum(p.monto for p in prestamos)
 
@@ -288,19 +460,30 @@ def dashboard():
 
     intereses_ganados = sum(p.interes_pagado for p in pagos)
 
-    prestamos_activos = Prestamo.query.filter_by(
-        estado="activo"
-    ).count()
+    prestamos_activos = sum(p.estado == "activo" for p in prestamos)
+    prestamos_pagados = sum(p.estado == "pagado" for p in prestamos)
+    prestamos_atrasados = sum(p.estado == "atrasado" for p in prestamos)
 
-    prestamos_pagados = Prestamo.query.filter_by(
-        estado="pagado"
-    ).count()
-
-    prestamos_atrasados = Prestamo.query.filter_by(
-        estado="atrasado"
-    ).count()
-
-    caja, banco = obtener_cuentas_contables()
+    if current_user.es_admin:
+        cuentas = CuentaContable.query.all()
+        caja = SimpleNamespace(saldo=sum(c.saldo for c in cuentas if c.slug.startswith("caja_menor")))
+        banco = SimpleNamespace(saldo=sum(c.saldo for c in cuentas if c.slug.startswith("banco")))
+        prestamistas_resumen = []
+        for usuario in Usuario.query.filter_by(rol="prestamista").order_by(Usuario.nombre).all():
+            cartera = [p for cliente in usuario.deudores for p in cliente.prestamos]
+            recaudos = [pago for prestamo in cartera for pago in prestamo.pagos]
+            prestamistas_resumen.append({
+                "usuario": usuario,
+                "clientes": len(usuario.deudores),
+                "prestamos": len(cartera),
+                "total_prestado": sum(p.monto for p in cartera),
+                "capital_pendiente": sum(p.saldo_capital for p in cartera),
+                "total_recaudado": sum(p.monto for p in recaudos),
+                "atrasados": sum(p.estado == "atrasado" for p in cartera),
+            })
+    else:
+        caja, banco = obtener_cuentas_contables()
+        prestamistas_resumen = []
 
     return render_template(
         "dashboard.html",
@@ -313,14 +496,20 @@ def dashboard():
         prestamos_pagados=prestamos_pagados,
         prestamos_atrasados=prestamos_atrasados,
         caja=caja,
-        banco=banco
+        banco=banco,
+        prestamistas_resumen=prestamistas_resumen,
     )
 
 
 @app.route("/cuentas", methods=["GET", "POST"])
 @login_required
 def cuentas():
-    cuentas = obtener_cuentas_contables()
+    if current_user.es_admin:
+        # Garantiza al menos las cuentas propias del administrador.
+        obtener_cuentas_contables()
+        cuentas = CuentaContable.query.order_by(CuentaContable.usuario_id, CuentaContable.nombre).all()
+    else:
+        cuentas = obtener_cuentas_contables()
 
     if request.method == "POST":
         cuenta_id = int(request.form.get("cuenta_id"))
@@ -332,6 +521,8 @@ def cuentas():
             return redirect(url_for("cuentas"))
 
         cuenta = CuentaContable.query.get_or_404(cuenta_id)
+        if not current_user.es_admin and cuenta.usuario_id != current_user.id:
+            abort(404)
         ajustar_saldo_cuenta(
             cuenta,
             monto,
@@ -346,10 +537,104 @@ def cuentas():
     return render_template("cuentas.html", cuentas=cuentas)
 
 
+@app.route("/prestamistas")
+@admin_required
+def prestamistas():
+    lista = Usuario.query.filter(Usuario.rol == "prestamista").order_by(Usuario.nombre).all()
+    return render_template("prestamistas.html", prestamistas=lista)
+
+
+@app.route("/prestamistas/<int:usuario_id>")
+@admin_required
+def detalle_prestamista(usuario_id):
+    prestamista = Usuario.query.filter_by(id=usuario_id, rol="prestamista").first_or_404()
+    clientes = Deudor.query.filter_by(usuario_id=prestamista.id).order_by(Deudor.creado_en.desc()).all()
+    cartera = [prestamo for cliente in clientes for prestamo in cliente.prestamos]
+    pagos = [pago for prestamo in cartera for pago in prestamo.pagos]
+    cuentas = CuentaContable.query.filter_by(usuario_id=prestamista.id).order_by(CuentaContable.nombre).all()
+    metricas = {
+        "clientes": len(clientes),
+        "prestamos": len(cartera),
+        "total_prestado": sum(p.monto for p in cartera),
+        "capital_pendiente": sum(p.saldo_capital for p in cartera),
+        "total_recaudado": sum(p.monto for p in pagos),
+        "intereses": sum(p.interes_pagado for p in pagos),
+        "atrasados": sum(p.estado == "atrasado" for p in cartera),
+    }
+    return render_template(
+        "detalle_prestamista.html",
+        prestamista=prestamista,
+        clientes=clientes,
+        cuentas=cuentas,
+        metricas=metricas,
+    )
+
+
+@app.route("/prestamistas/nuevo", methods=["GET", "POST"])
+@admin_required
+def nuevo_prestamista():
+    if request.method == "POST":
+        nombre = (request.form.get("nombre") or "").strip()
+        usuario = (request.form.get("usuario") or "").strip().lower()
+        password = request.form.get("password") or ""
+
+        if not nombre or not usuario or len(password) < 6:
+            flash("Completa los datos y usa una contraseña de al menos 6 caracteres.", "error")
+        elif Usuario.query.filter_by(usuario=usuario).first():
+            flash("Ese nombre de usuario ya está registrado.", "error")
+        else:
+            prestamista = Usuario(
+                nombre=nombre,
+                usuario=usuario,
+                password_hash=generate_password_hash(password),
+                rol="prestamista",
+                activo=True,
+            )
+            db.session.add(prestamista)
+            db.session.commit()
+            obtener_cuentas_contables(prestamista)
+            flash("Prestamista creado correctamente.", "success")
+            return redirect(url_for("prestamistas"))
+
+    return render_template("prestamista_form.html", prestamista=None)
+
+
+@app.route("/prestamistas/<int:usuario_id>/editar", methods=["GET", "POST"])
+@admin_required
+def editar_prestamista(usuario_id):
+    prestamista = Usuario.query.filter_by(id=usuario_id, rol="prestamista").first_or_404()
+    if request.method == "POST":
+        nombre = (request.form.get("nombre") or "").strip()
+        usuario = (request.form.get("usuario") or "").strip().lower()
+        password = request.form.get("password") or ""
+        repetido = Usuario.query.filter(Usuario.usuario == usuario, Usuario.id != prestamista.id).first()
+
+        if not nombre or not usuario:
+            flash("Nombre y usuario son obligatorios.", "error")
+        elif repetido:
+            flash("Ese nombre de usuario ya está registrado.", "error")
+        elif password and len(password) < 6:
+            flash("La nueva contraseña debe tener al menos 6 caracteres.", "error")
+        else:
+            prestamista.nombre = nombre
+            prestamista.usuario = usuario
+            prestamista.activo = request.form.get("activo") == "on"
+            if password:
+                prestamista.password_hash = generate_password_hash(password)
+            db.session.commit()
+            flash("Prestamista actualizado correctamente.", "success")
+            return redirect(url_for("prestamistas"))
+
+    return render_template("prestamista_form.html", prestamista=prestamista)
+
+
 @app.route("/deudores")
 @login_required
 def deudores():
-    lista = Deudor.query.order_by(Deudor.creado_en.desc()).all()
+    query = Deudor.query
+    if not current_user.es_admin:
+        query = query.filter_by(usuario_id=current_user.id)
+    lista = query.order_by(Deudor.creado_en.desc()).all()
     return render_template("deudores.html", deudores=lista)
 
 
@@ -358,6 +643,7 @@ def deudores():
 def nuevo_deudor():
     if request.method == "POST":
         deudor = Deudor(
+            usuario_id=current_user.id,
             nombre=request.form.get("nombre") or None,
             telefono=request.form.get("telefono") or None,
             referencia=request.form.get("referencia"),
@@ -376,14 +662,14 @@ def nuevo_deudor():
 @app.route("/deudor/<int:deudor_id>")
 @login_required
 def detalle_deudor(deudor_id):
-    deudor = Deudor.query.get_or_404(deudor_id)
+    deudor = deudor_visible_o_404(deudor_id)
     return render_template("detalle_deudor.html", deudor=deudor)
 
 
 @app.route("/deudores/editar/<int:deudor_id>", methods=["GET", "POST"])
 @login_required
 def editar_deudor(deudor_id):
-    deudor = Deudor.query.get_or_404(deudor_id)
+    deudor = deudor_visible_o_404(deudor_id)
 
     if request.method == "POST":
         deudor.nombre = request.form.get("nombre") or None
@@ -402,7 +688,7 @@ def editar_deudor(deudor_id):
 @app.route("/deudores/eliminar/<int:deudor_id>", methods=["POST"])
 @login_required
 def eliminar_deudor(deudor_id):
-    deudor = Deudor.query.get_or_404(deudor_id)
+    deudor = deudor_visible_o_404(deudor_id)
 
     db.session.delete(deudor)
     db.session.commit()
@@ -414,8 +700,9 @@ def eliminar_deudor(deudor_id):
 @app.route("/prestamo/nuevo/<int:deudor_id>", methods=["GET", "POST"])
 @login_required
 def nuevo_prestamo(deudor_id):
-    deudor = Deudor.query.get_or_404(deudor_id)
-    cuentas = obtener_cuentas_contables()
+    deudor = deudor_visible_o_404(deudor_id)
+    propietario = deudor.propietario
+    cuentas = obtener_cuentas_contables(propietario)
 
     if request.method == "POST":
         monto = float(request.form.get("monto"))
@@ -438,7 +725,7 @@ def nuevo_prestamo(deudor_id):
         total_fuentes = monto_caja + monto_banco
 
         if total_fuentes == 0:
-            cuenta = obtener_cuenta(cuenta_slug)
+            cuenta = obtener_cuenta(cuenta_slug, propietario)
 
             if not cuenta:
                 flash("Selecciona una cuenta válida para el desembolso.", "error")
@@ -451,14 +738,14 @@ def nuevo_prestamo(deudor_id):
                 return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
 
             if monto_caja > 0:
-                caja = obtener_cuenta("caja_menor")
+                caja = obtener_cuenta("caja_menor", propietario)
                 if not caja:
                     flash("No se encontró la cuenta Caja menor.", "error")
                     return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
                 sources.append((caja, monto_caja))
 
             if monto_banco > 0:
-                banco = obtener_cuenta("banco")
+                banco = obtener_cuenta("banco", propietario)
                 if not banco:
                     flash("No se encontró la cuenta Banco.", "error")
                     return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
@@ -532,14 +819,14 @@ def nuevo_prestamo(deudor_id):
 @app.route("/pago/cuota/<int:cuota_id>", methods=["POST"])
 @login_required
 def pagar_cuota(cuota_id):
-    cuota = Cuota.query.get_or_404(cuota_id)
+    cuota = cuota_visible_o_404(cuota_id)
     prestamo = cuota.prestamo
 
     tipo_pago = request.form.get("tipo_pago")
     monto = float(request.form.get("monto"))
     nota = request.form.get("nota")
     cuenta_slug = request.form.get("cuenta_destino") or "caja_menor"
-    cuenta_destino = obtener_cuenta(cuenta_slug)
+    cuenta_destino = obtener_cuenta(cuenta_slug, prestamo.deudor.propietario)
 
     if not cuenta_destino:
         flash("Selecciona una cuenta destino válida para este pago.", "error")
@@ -657,7 +944,7 @@ def pagar_cuota(cuota_id):
 @app.route("/cuota/editar/<int:cuota_id>", methods=["GET", "POST"])
 @login_required
 def editar_cuota(cuota_id):
-    cuota = Cuota.query.get_or_404(cuota_id)
+    cuota = cuota_visible_o_404(cuota_id)
     pagos_existentes = Pago.query.filter_by(cuota_id=cuota.id).count()
 
     if pagos_existentes > 0:
@@ -691,7 +978,7 @@ def editar_cuota(cuota_id):
 @app.route("/prestamo/<int:prestamo_id>")
 @login_required
 def detalle_prestamo(prestamo_id):
-    prestamo = Prestamo.query.get_or_404(prestamo_id)
+    prestamo = prestamo_visible_o_404(prestamo_id)
 
     show_all = request.args.get("show_all") == "1"
 
@@ -714,14 +1001,14 @@ def detalle_prestamo(prestamo_id):
         prestamo=prestamo,
         cuotas=cuotas,
         pagos=pagos,
-        cuentas=obtener_cuentas_contables()
+        cuentas=obtener_cuentas_contables(prestamo.deudor.propietario)
     )
 
 
 @app.route("/pago/editar/<int:pago_id>", methods=["GET", "POST"])
 @login_required
 def editar_pago(pago_id):
-    pago = Pago.query.get_or_404(pago_id)
+    pago = pago_visible_o_404(pago_id)
     prestamo = pago.prestamo
     cuota = pago.cuota
 
@@ -775,7 +1062,7 @@ def editar_pago(pago_id):
 @app.route("/prestamo/editar/<int:prestamo_id>", methods=["GET", "POST"])
 @login_required
 def editar_prestamo(prestamo_id):
-    prestamo = Prestamo.query.get_or_404(prestamo_id)
+    prestamo = prestamo_visible_o_404(prestamo_id)
 
     if request.method == "POST":
         monto_nuevo = float(request.form.get("monto"))
@@ -848,7 +1135,7 @@ def editar_prestamo(prestamo_id):
         flash("Préstamo actualizado y saldos recalculados correctamente", "success")
         return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
 
-    return render_template("nuevo_prestamo.html", deudor=prestamo.deudor, prestamo=prestamo, cuentas=obtener_cuentas_contables())
+    return render_template("nuevo_prestamo.html", deudor=prestamo.deudor, prestamo=prestamo, cuentas=obtener_cuentas_contables(prestamo.deudor.propietario))
 
 
 @app.route("/notificaciones")
@@ -912,7 +1199,7 @@ def notificaciones():
 @app.route("/prestamo/refinanciar/<int:prestamo_id>", methods=["GET", "POST"])
 @login_required
 def refinanciar_prestamo(prestamo_id):
-    prestamo_anterior = Prestamo.query.get_or_404(prestamo_id)
+    prestamo_anterior = prestamo_visible_o_404(prestamo_id)
     deudor = prestamo_anterior.deudor
 
     if prestamo_anterior.estado in ("pagado", "refinanciado"):
@@ -999,7 +1286,7 @@ def refinanciar_prestamo(prestamo_id):
 @app.route("/prestamo/eliminar/<int:prestamo_id>", methods=["POST"])
 @login_required
 def eliminar_prestamo(prestamo_id):
-    prestamo = Prestamo.query.get_or_404(prestamo_id)
+    prestamo = prestamo_visible_o_404(prestamo_id)
     deudor_id = prestamo.deudor_id
 
     db.session.delete(prestamo)
@@ -1013,5 +1300,6 @@ if __name__ == "__main__":
     with app.app_context():
         asegurar_esquema()
         crear_admin()
+        asignar_datos_existentes_al_admin()
 
     app.run(debug=True)

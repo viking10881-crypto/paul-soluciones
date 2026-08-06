@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Seguridad | Solucione$ Paul{% endblock %}
+{% block content %}
+<section class="page-section">
+    <div class="page-header"><div><h1>Seguridad de la cuenta</h1><p>Cambia la contraseña de {{ current_user.usuario }}</p></div></div>
+    <div class="form-card"><form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+            <div class="form-group"><label>Contraseña actual</label><input type="password" name="password_actual" required autocomplete="current-password"></div>
+            <div class="form-group"><label>Contraseña nueva</label><input type="password" name="password_nueva" required minlength="10" autocomplete="new-password"><small>Mínimo 10 caracteres.</small></div>
+            <div class="form-group"><label>Confirmar contraseña nueva</label><input type="password" name="password_confirmacion" required minlength="10" autocomplete="new-password"></div>
+        </div>
+        <button type="submit" class="btn-primary">Actualizar contraseña</button>
+    </form></div>
+</section>
+{% endblock %}

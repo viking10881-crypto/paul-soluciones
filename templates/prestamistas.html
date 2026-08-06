@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Prestamistas | Solucione$ Paul{% endblock %}
+{% block content %}
+<section class="page-section">
+    <div class="page-header">
+        <div><h1>Prestamistas</h1><p>Usuarios y carteras administradas</p></div>
+        <a href="{{ url_for('nuevo_prestamista') }}" class="btn-action">+ Nuevo prestamista</a>
+    </div>
+    <div class="table-card"><table>
+        <thead><tr><th>Nombre</th><th>Usuario</th><th>Estado</th><th>Clientes</th><th>Préstamos</th><th>Acción</th></tr></thead>
+        <tbody>{% for item in prestamistas %}
+            <tr>
+                <td>{{ item.nombre }}</td><td>{{ item.usuario }}</td><td>{{ 'Activo' if item.activo else 'Inactivo' }}</td>
+                <td>{{ item.deudores|length }}</td>
+                <td>{% set total = namespace(valor=0) %}{% for cliente in item.deudores %}{% set total.valor = total.valor + cliente.prestamos|length %}{% endfor %}{{ total.valor }}</td>
+                <td>
+                    <a class="btn-small" href="{{ url_for('detalle_prestamista', usuario_id=item.id) }}">Ver detalle</a>
+                    <a class="btn-small" href="{{ url_for('editar_prestamista', usuario_id=item.id) }}">Editar</a>
+                </td>
+            </tr>
+        {% else %}<tr><td colspan="6">Aún no hay prestamistas registrados.</td></tr>{% endfor %}</tbody>
+    </table></div>
+</section>
+{% endblock %}

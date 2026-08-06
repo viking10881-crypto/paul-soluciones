@@ -20,6 +20,7 @@
     <div class="form-card">
 
         <form method="POST" {% if prestamo %}action="{{ url_for('editar_prestamo', prestamo_id=prestamo.id) }}"{% endif %}>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
             <div class="form-grid">
 

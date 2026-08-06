@@ -25,6 +25,7 @@
                     <tr>
                         <th>Estado</th>
                         <th>Nombre</th>
+                        {% if current_user.es_admin %}<th>Prestamista</th>{% endif %}
                         <th>Teléfono</th>
                         <th>Referencia</th>
                         <th>Saldo total</th>
@@ -50,6 +51,7 @@
                         </td>
                         {% set saldo_total = deudor.prestamos | sum(attribute="saldo_capital") %}
                         <td>{{ deudor.nombre }}</td>
+                        {% if current_user.es_admin %}<td>{{ deudor.propietario.nombre }}</td>{% endif %}
                         <td>{{ deudor.telefono or "—" }}</td>
                         <td>{{ deudor.referencia or "—" }}</td>
                         <td>
@@ -69,6 +71,7 @@
                             </a>
 
                             <form method="POST" action="{{ url_for('eliminar_deudor', deudor_id=deudor.id) }}" style="display:inline" onsubmit="return confirm('¿Eliminar este deudor y todos sus préstamos asociados?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn-small btn-danger">Eliminar</button>
                             </form>
                         </td>

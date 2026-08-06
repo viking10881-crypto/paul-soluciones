@@ -119,6 +119,7 @@
 
                             <form method="POST"
                                   action="{{ url_for('pagar_cuota', cuota_id=cuota.id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                                 {#
                                     Valores pendientes de pago para esta cuota.

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar' if prestamista else 'Nuevo' }} prestamista | Solucione$ Paul{% endblock %}
+{% block content %}
+<section class="page-section">
+    <div class="page-header">
+        <div><h1>{{ 'Editar' if prestamista else 'Nuevo' }} prestamista</h1><p>Acceso independiente a su propia cartera</p></div>
+        <a href="{{ url_for('prestamistas') }}" class="btn-small">← Volver</a>
+    </div>
+    <div class="form-card"><form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+            <div class="form-group"><label>Nombre completo</label><input name="nombre" value="{{ prestamista.nombre if prestamista else '' }}" required></div>
+            <div class="form-group"><label>Usuario</label><input name="usuario" value="{{ prestamista.usuario if prestamista else '' }}" required autocomplete="off"></div>
+            <div class="form-group"><label>{{ 'Nueva contraseña (opcional)' if prestamista else 'Contraseña' }}</label><input type="password" name="password" {% if not prestamista %}required{% endif %} minlength="6" autocomplete="new-password"></div>
+            {% if prestamista %}<div class="form-group"><label><input type="checkbox" name="activo" {% if prestamista.activo %}checked{% endif %}> Usuario activo</label></div>{% endif %}
+        </div>
+        <button class="btn-primary" type="submit">Guardar prestamista</button>
+    </form></div>
+</section>
+{% endblock %}

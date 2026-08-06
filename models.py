@@ -12,13 +12,27 @@ class Usuario(db.Model, UserMixin):
     nombre = db.Column(db.String(100), nullable=False)
     usuario = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
+    rol = db.Column(db.String(20), nullable=False, default="prestamista")
+    activo = db.Column(db.Boolean, nullable=False, default=True)
     creado_en = db.Column(db.DateTime, default=datetime.utcnow)
+
+    deudores = db.relationship("Deudor", backref="propietario", lazy=True)
+    cuentas = db.relationship("CuentaContable", backref="propietario", lazy=True)
+
+    @property
+    def es_admin(self):
+        return self.rol == "admin"
+
+    @property
+    def is_active(self):
+        return self.activo
 
 
 class CuentaContable(db.Model):
     __tablename__ = "cuentas_contables"
 
     id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True, index=True)
     nombre = db.Column(db.String(100), nullable=False)
     slug = db.Column(db.String(50), nullable=False, unique=True)
     saldo = db.Column(db.Float, default=0.0, nullable=False)
@@ -49,6 +63,7 @@ class Deudor(db.Model):
     __tablename__ = "deudores"
 
     id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True, index=True)
     nombre = db.Column(db.String(150), nullable=True)
     cedula = db.Column(db.String(50), unique=True, nullable=True)
     telefono = db.Column(db.String(50), nullable=True)

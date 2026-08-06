@@ -47,9 +47,20 @@
                     🧾 Cuentas
                 </a>
 
-                <a href="{{ url_for('logout') }}" data-label="Cerrar sesión">
-                    🚪 Cerrar sesión
+                <a href="{{ url_for('seguridad_perfil') }}" data-label="Seguridad">
+                    🔐 Cambiar contraseña
                 </a>
+
+                {% if current_user.es_admin %}
+                <a href="{{ url_for('prestamistas') }}" data-label="Prestamistas">
+                    👤 Prestamistas
+                </a>
+                {% endif %}
+
+                <form method="POST" action="{{ url_for('logout') }}" class="logout-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" data-label="Cerrar sesión">🚪 Cerrar sesión</button>
+                </form>
 
             </nav>
 
@@ -73,6 +84,11 @@
                 <button id="theme-toggle">
                     🌙 / ☀️
                 </button>
+
+                <div class="session-user">
+                    <strong>{{ current_user.nombre }}</strong>
+                    <span>{{ "Administrador" if current_user.es_admin else "Prestamista" }}</span>
+                </div>
 
             </header>
 

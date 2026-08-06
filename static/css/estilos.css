@@ -8,6 +8,12 @@ body {
     font-family: Arial, Helvetica, sans-serif;
 }
 
+.session-user { margin-left: auto; display: flex; flex-direction: column; text-align: right; font-size: .9rem; }
+.session-user span { opacity: .7; font-size: .75rem; }
+.admin-activity-header { margin-top: 2rem; }
+.logout-form { margin: 0; }
+.menu .logout-form button { width: 100%; border: 0; cursor: pointer; text-align: left; font: inherit; }
+
 /* =====================
    MODO OSCURO (base)
    ===================== */
@@ -44,13 +50,15 @@ body {
     color: #0f172a;
 }
 
-.light-mode .menu a {
+.light-mode .menu a,
+.light-mode .menu .logout-form button {
     background: rgba(15, 23, 42, 0.06);
     color: #0f172a;
     text-shadow: none;
 }
 
-.light-mode .menu a:hover {
+.light-mode .menu a:hover,
+.light-mode .menu .logout-form button:hover {
     background: linear-gradient(135deg, #c7d2fe, #bae6fd);
     color: #1e3a8a;
 }
@@ -542,7 +550,8 @@ body {
     gap: 14px;
 }
 
-.menu a {
+.menu a,
+.menu .logout-form button {
     text-decoration: none;
     color: white;
     padding: 14px 16px;
@@ -556,7 +565,8 @@ body {
     overflow: hidden;
 }
 
-.menu a:hover {
+.menu a:hover,
+.menu .logout-form button:hover {
     background: linear-gradient(135deg, #2563eb, #0ea5e9);
 }
 
