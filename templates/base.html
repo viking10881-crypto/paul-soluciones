@@ -57,6 +57,10 @@
                 </a>
                 {% endif %}
 
+                <a href="{{ url_for('liquidaciones') }}" data-label="Liquidación de capital">
+                    💵 Liquidación de capital
+                </a>
+
                 <form method="POST" action="{{ url_for('logout') }}" class="logout-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" data-label="Cerrar sesión">🚪 Cerrar sesión</button>

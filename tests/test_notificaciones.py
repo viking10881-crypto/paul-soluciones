@@ -8,7 +8,7 @@ from app import app, db, Usuario, Deudor, Prestamo, Cuota
 
 @pytest.fixture
 def client():
-    app.config.update(TESTING=True, SQLALCHEMY_DATABASE_URI="sqlite://")
+    app.config.update(TESTING=True)
 
     with app.app_context():
         db.drop_all()

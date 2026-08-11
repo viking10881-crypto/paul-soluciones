@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Transferir a prestamista | Solucione$ Paul{% endblock %}
+
+{% block content %}
+<section class="page-section">
+    <div class="page-header">
+        <div>
+            <h1>Transferir saldo al prestamista</h1>
+            <p>Desde la cuenta del administrador al banco del prestamista.</p>
+        </div>
+        <div>
+            <a href="{{ url_for('cuentas') }}" class="btn-small">← Volver a cuentas</a>
+        </div>
+    </div>
+
+    <div class="form-card">
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="form-group">
+                <label>Prestamista</label>
+                <select name="prestamista_id" required>
+                    <option value="" disabled selected>Selecciona un prestamista</option>
+                    {% for p in prestamistas %}
+                    <option value="{{ p.id }}">{{ p.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Monto</label>
+                <input type="number" name="monto" step="0.01" min="0.01" required>
+            </div>
+
+            <div class="form-group">
+                <label>Tasa mensual del administrador (%)</label>
+                <input type="number" name="tasa_admin" step="0.01" min="0" required placeholder="Ej: 6">
+            </div>
+
+            <div class="form-group">
+                <label>Plazo en meses</label>
+                <input type="number" name="plazo" min="1" required placeholder="Ej: 5">
+            </div>
+
+            <div class="form-group">
+                <button class="btn-primary" type="submit">Transferir</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="cards-grid">
+        <div class="metric-card"><span>Banco admin</span><h2>${{ "{:,.0f}".format(cuenta_admin.saldo) }}</h2></div>
+    </div>
+
+</section>
+{% endblock %}

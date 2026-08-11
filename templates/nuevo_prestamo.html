@@ -40,12 +40,12 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Interés mensual (%)</label>
+                    <label>Tasa mensual total del cliente (%)</label>
                     <input
                         type="number"
                         name="interes_mensual"
                         id="interes_mensual"
-                        placeholder="Ej: 7"
+                        placeholder="Ej: 10"
                         min="0"
                         max="100"
                         step="0.1"
@@ -53,6 +53,24 @@
                         required
                     >
                 </div>
+
+                {% if not prestamo %}
+                <div class="form-group">
+                    <label>Origen del capital</label>
+                    <select name="capital_prestamista_id" id="capital_prestamista_id">
+                        <option value="">Capital propio del prestamista</option>
+                        {% for capital in capitales_admin %}
+                        <option value="{{ capital.id }}"
+                                data-monto="{{ capital.monto }}"
+                                data-plazo="{{ capital.plazo_meses or '' }}"
+                                data-tasa="{{ capital.tasa_admin }}">
+                            Admin: ${{ "{:,.0f}".format(capital.monto) }} · {{ capital.tasa_admin }}% · {{ capital.plazo_meses }} meses
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <small>Selecciona el capital del administrador que financiará este préstamo.</small>
+                </div>
+                {% endif %}
 
                 <div class="form-group">
                     <label>Cuenta de desembolso</label>
@@ -109,6 +127,26 @@
                         <span>Cuota mensual aprox.</span>
                         <strong id="cuota_preview">$0</strong>
                     </div>
+
+                    <div>
+                        <span>Interés total</span>
+                        <strong id="interes_total_preview">$0</strong>
+                    </div>
+
+                    <div>
+                        <span>Total a pagar</span>
+                        <strong id="total_pagar_preview">$0</strong>
+                    </div>
+
+                    <div id="admin_interes_card" style="display:none">
+                        <span>Interés administrador</span>
+                        <strong id="admin_interes_preview">$0</strong>
+                    </div>
+
+                    <div id="ganancia_prestamista_card" style="display:none">
+                        <span>Ganancia prestamista</span>
+                        <strong id="ganancia_prestamista_preview">$0</strong>
+                    </div>
                 </div>
             </div>
 
@@ -126,10 +164,17 @@
 const montoInput    = document.getElementById("monto");
 const cuotasInput   = document.getElementById("numero_cuotas");
 const interesInput  = document.getElementById("interes_mensual");
+const capitalAdminSelect = document.getElementById("capital_prestamista_id");
 
 const interesPreview = document.getElementById("interes_preview");
 const capitalPreview = document.getElementById("capital_preview");
 const cuotaPreview   = document.getElementById("cuota_preview");
+const interesTotalPreview = document.getElementById("interes_total_preview");
+const totalPagarPreview = document.getElementById("total_pagar_preview");
+const adminInteresPreview = document.getElementById("admin_interes_preview");
+const gananciaPrestamistaPreview = document.getElementById("ganancia_prestamista_preview");
+const adminInteresCard = document.getElementById("admin_interes_card");
+const gananciaPrestamistaCard = document.getElementById("ganancia_prestamista_card");
 
 function formatoCOP(valor) {
     return new Intl.NumberFormat("es-CO", {
@@ -139,18 +184,28 @@ function formatoCOP(valor) {
     }).format(valor || 0);
 }
 
-function calcularPreview() {
+async function calcularPreview() {
     const monto  = parseFloat(montoInput.value)   || 0;
     const cuotas = parseInt(cuotasInput.value)    || 0;
     const tasa   = parseFloat(interesInput.value) || 0;
+    const opcionCapital = capitalAdminSelect ? capitalAdminSelect.options[capitalAdminSelect.selectedIndex] : null;
+    const tasaAdmin = opcionCapital && opcionCapital.dataset.tasa ? parseFloat(opcionCapital.dataset.tasa) : 0;
+    if (!monto || !cuotas) return;
 
-    const interes = monto * (tasa / 100);
-    const capital = cuotas > 0 ? monto / cuotas : 0;
-    const cuota   = capital + interes;
+    const params = new URLSearchParams({capital: monto, cuotas, tasa_admin: tasaAdmin, tasa_cliente: tasa});
+    const respuesta = await fetch(`{{ url_for('simular_liquidacion') }}?${params.toString()}`);
+    if (!respuesta.ok) return;
+    const datos = await respuesta.json();
 
-    interesPreview.textContent = formatoCOP(interes);
-    capitalPreview.textContent = formatoCOP(capital);
-    cuotaPreview.textContent   = formatoCOP(cuota);
+    interesPreview.textContent = formatoCOP(datos.interes_cliente);
+    capitalPreview.textContent = formatoCOP(datos.capital_mensual);
+    cuotaPreview.textContent   = formatoCOP(datos.cuota_cliente);
+    interesTotalPreview.textContent = formatoCOP(datos.interes_cliente * cuotas);
+    totalPagarPreview.textContent = formatoCOP(datos.total_cliente_final);
+    adminInteresPreview.textContent = formatoCOP(datos.interes_admin);
+    gananciaPrestamistaPreview.textContent = formatoCOP(datos.ganancia_prestamista);
+    adminInteresCard.style.display = tasaAdmin > 0 ? "block" : "none";
+    gananciaPrestamistaCard.style.display = tasaAdmin > 0 ? "block" : "none";
 }
 
 const montoCajaInput = document.getElementById("monto_caja_menor");
@@ -191,6 +246,16 @@ montoInput.addEventListener("input", () => {
 });
 cuotasInput.addEventListener("input", calcularPreview);
 interesInput.addEventListener("input", calcularPreview);
+
+if (capitalAdminSelect) {
+    capitalAdminSelect.addEventListener("change", () => {
+        const opcion = capitalAdminSelect.options[capitalAdminSelect.selectedIndex];
+        if (opcion.dataset.monto) montoInput.value = opcion.dataset.monto;
+        if (opcion.dataset.plazo) cuotasInput.value = opcion.dataset.plazo;
+        calcularPreview();
+        actualizarOrigen();
+    });
+}
 
 // calcula al cargar con el valor por defecto
 calcularPreview();

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Liquidación de capital | Solucione$ Paul{% endblock %}
+
+{% block content %}
+<section class="page-section">
+    <div class="page-header">
+        <div>
+            <h1>Liquidación de capital</h1>
+            <p>Aquí aparecen las cuotas ya pagadas que pueden liquidarse al administrador.</p>
+        </div>
+    </div>
+
+    <div class="table-card">
+        <h2>Capitales administrador → prestamista</h2>
+        <table>
+            <thead><tr><th>Prestamista</th><th>Capital inicial</th><th>Tasa admin</th><th>Tasa cliente</th><th>Margen prestamista</th><th>Total admin</th><th>Ganancia prestamista</th><th>Saldo capital</th><th>Estado</th></tr></thead>
+            <tbody>{% for item in resumenes %}
+                <tr>
+                    <td>{{ item.capital.prestamista.nombre }}</td>
+                    <td>${{ "{:,.0f}".format(item.capital.monto) }}</td>
+                    <td>{{ item.capital.tasa_admin }}%</td>
+                    <td>{% if item.proyeccion %}{{ item.proyeccion.tasa_cliente }}%{% else %}Pendiente de colocar{% endif %}</td>
+                    <td>{% if item.proyeccion %}{{ item.proyeccion.tasa_prestamista }}%{% else %}—{% endif %}</td>
+                    <td>{% if item.proyeccion %}${{ "{:,.0f}".format(item.proyeccion.total_admin_final) }}{% else %}—{% endif %}</td>
+                    <td>{% if item.proyeccion %}${{ "{:,.0f}".format(item.proyeccion.ganancia_prestamista_total) }}{% else %}—{% endif %}</td>
+                    <td>${{ "{:,.0f}".format(item.capital.saldo_pendiente) }}</td>
+                    <td>{{ item.capital.estado }}</td>
+                </tr>
+            {% else %}<tr><td colspan="9">No hay capitales del administrador registrados.</td></tr>{% endfor %}</tbody>
+        </table>
+    </div>
+
+    <div class="table-card">
+        <h2>Cuotas pagadas y liquidaciones</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Cliente</th>
+                    <th>Prestamista</th>
+                    <th>Préstamo</th>
+                    <th>Vencimiento</th>
+                    <th>Capital</th>
+                    <th>Tasas admin / cliente</th>
+                    <th>Pago cliente</th>
+                    <th>Estado</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cuota in cuotas %}
+                <tr>
+                    <td>{{ cuota.id }}</td>
+                    <td>{{ cuota.prestamo.deudor.nombre }}</td>
+                    <td>{{ cuota.prestamo.deudor.propietario.nombre }}</td>
+                    <td>#{{ cuota.prestamo.id }}</td>
+                    <td>{{ cuota.fecha_vencimiento.strftime('%d/%m/%Y') }}</td>
+                    <td>${{ "{:,.0f}".format(cuota.capital) }}</td>
+                    <td>{{ cuota.prestamo.capital_administrador.tasa_admin }}% / {{ cuota.prestamo.interes_mensual }}%</td>
+                    <td>${{ "{:,.0f}".format(cuota.total) }}</td>
+                    <td>
+                        {% if cuota.liquidado %}
+                            Liquidada el {{ cuota.fecha_liquidacion.strftime('%d/%m/%Y %H:%M') if cuota.fecha_liquidacion else '—' }}
+                        {% else %}
+                            Pagada
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if cuota.liquidado and cuota.liquidacion %}
+                            <div>Admin recibe: ${{ "{:,.0f}".format(cuota.liquidacion.total_admin) }} · Prestamista gana: ${{ "{:,.0f}".format(cuota.liquidacion.ganancia_prestamista) }}</div>
+                        {% elif cuota.liquidado %}
+                            <div>Liquidación histórica</div>
+                        {% else %}
+                            <a href="{{ url_for('liquidar_cuota', cuota_id=cuota.id) }}" class="btn-small">Liquidar</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="10">No hay cuotas pagadas disponibles para liquidar.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

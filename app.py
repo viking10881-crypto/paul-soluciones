@@ -3,9 +3,9 @@ import hmac
 import secrets
 from functools import wraps
 from types import SimpleNamespace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from calendar import monthrange
-from flask import Flask, render_template, redirect, url_for, request, flash, abort, session
+from flask import Flask, render_template, redirect, url_for, request, flash, abort, session, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import text
@@ -20,7 +20,10 @@ from models import (
     Pago,
     CuentaContable,
     CuentaMovimiento,
+    CapitalPrestamista,
+    LiquidacionCapital,
 )
+from servicios_liquidacion import calcular_distribucion_liquidacion
 
 load_dotenv()
 
@@ -80,6 +83,17 @@ def agregar_cabeceras_seguridad(response):
     if app.config["SESSION_COOKIE_SECURE"]:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
+
+
+@app.errorhandler(400)
+def handle_bad_request(e):
+    # Mostrar el motivo (por ejemplo CSRF fallido) y redirigir al login
+    descripcion = getattr(e, 'description', None)
+    if descripcion:
+        flash(descripcion, 'error')
+    else:
+        flash('Solicitud inválida (400).', 'error')
+    return redirect(url_for('login'))
 
 
 @login_manager.user_loader
@@ -211,6 +225,8 @@ def asegurar_esquema():
             prestamos_cols = [row[1] for row in result.fetchall()]
             if "cuenta_desembolso_id" not in prestamos_cols:
                 conn.execute(text("ALTER TABLE prestamos ADD COLUMN cuenta_desembolso_id INTEGER"))
+            if "capital_prestamista_id" not in prestamos_cols:
+                conn.execute(text("ALTER TABLE prestamos ADD COLUMN capital_prestamista_id INTEGER"))
 
             result = conn.execute(text("PRAGMA table_info(pagos)"))
             pagos_cols = [row[1] for row in result.fetchall()]
@@ -223,6 +239,26 @@ def asegurar_esquema():
                 conn.execute(text("ALTER TABLE cuenta_movimientos ADD COLUMN prestamo_id INTEGER"))
             if "pago_id" not in movimientos_cols:
                 conn.execute(text("ALTER TABLE cuenta_movimientos ADD COLUMN pago_id INTEGER"))
+
+            result = conn.execute(text("PRAGMA table_info(cuotas)"))
+            cuotas_cols = [row[1] for row in result.fetchall()]
+            if "liquidado" not in cuotas_cols:
+                conn.execute(text("ALTER TABLE cuotas ADD COLUMN liquidado BOOLEAN NOT NULL DEFAULT 0"))
+            if "tasa_admin" not in cuotas_cols:
+                conn.execute(text("ALTER TABLE cuotas ADD COLUMN tasa_admin FLOAT"))
+            if "ganancia_prestamista" not in cuotas_cols:
+                conn.execute(text("ALTER TABLE cuotas ADD COLUMN ganancia_prestamista FLOAT NOT NULL DEFAULT 0.0"))
+            if "fecha_liquidacion" not in cuotas_cols:
+                conn.execute(text("ALTER TABLE cuotas ADD COLUMN fecha_liquidacion DATETIME"))
+
+            result = conn.execute(text("PRAGMA table_info(capital_prestamista)"))
+            capital_cols = [row[1] for row in result.fetchall()]
+            if "capital_liquidado" not in capital_cols:
+                conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN capital_liquidado FLOAT NOT NULL DEFAULT 0.0"))
+            if "interes_liquidado" not in capital_cols:
+                conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN interes_liquidado FLOAT NOT NULL DEFAULT 0.0"))
+            if "estado" not in capital_cols:
+                conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN estado VARCHAR(20) NOT NULL DEFAULT 'disponible'"))
 
             conn.execute(text("PRAGMA foreign_keys = ON"))
             conn.commit()
@@ -240,6 +276,7 @@ def asegurar_esquema():
                 conn.execute(text(
                     "ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS cuenta_desembolso_id INTEGER"
                 ))
+            conn.execute(text("ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS capital_prestamista_id INTEGER"))
 
             result = conn.execute(text(
                 "SELECT column_name FROM information_schema.columns "
@@ -267,6 +304,35 @@ def asegurar_esquema():
                 conn.execute(text(
                     "ALTER TABLE cuenta_movimientos ADD COLUMN IF NOT EXISTS pago_id INTEGER"
                 ))
+
+            result = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'cuotas' AND column_name = 'liquidado'"
+            ))
+            if result.fetchone() is None:
+                conn.execute(text(
+                    "ALTER TABLE cuotas ADD COLUMN IF NOT EXISTS liquidado BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+            result = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'cuotas' AND column_name = 'tasa_admin'"
+            ))
+            if result.fetchone() is None:
+                conn.execute(text(
+                    "ALTER TABLE cuotas ADD COLUMN IF NOT EXISTS tasa_admin FLOAT"
+                ))
+            result = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'cuotas' AND column_name = 'ganancia_prestamista'"
+            ))
+            if result.fetchone() is None:
+                conn.execute(text(
+                    "ALTER TABLE cuotas ADD COLUMN IF NOT EXISTS ganancia_prestamista FLOAT NOT NULL DEFAULT 0.0"
+                ))
+            conn.execute(text("ALTER TABLE cuotas ADD COLUMN IF NOT EXISTS fecha_liquidacion TIMESTAMP"))
+            conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS capital_liquidado FLOAT NOT NULL DEFAULT 0.0"))
+            conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS interes_liquidado FLOAT NOT NULL DEFAULT 0.0"))
+            conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'disponible'"))
 
             conn.commit()
 
@@ -334,6 +400,7 @@ def obtener_cuentas_contables(usuario=None):
     sufijo = "" if usuario.es_admin else f"_{usuario.id}"
     caja = CuentaContable.query.filter_by(usuario_id=usuario.id, slug=f"caja_menor{sufijo}").first()
     banco = CuentaContable.query.filter_by(usuario_id=usuario.id, slug=f"banco{sufijo}").first()
+    ganancia = CuentaContable.query.filter_by(usuario_id=usuario.id, slug=f"ganancia{sufijo}").first()
 
     if not caja:
         caja = CuentaContable(nombre="Caja menor", slug=f"caja_menor{sufijo}", saldo=0.0, usuario_id=usuario.id)
@@ -343,7 +410,11 @@ def obtener_cuentas_contables(usuario=None):
         banco = CuentaContable(nombre="Banco", slug=f"banco{sufijo}", saldo=0.0, usuario_id=usuario.id)
         db.session.add(banco)
 
-    if not caja.id or not banco.id:
+    if not ganancia:
+        ganancia = CuentaContable(nombre="Ganancia", slug=f"ganancia{sufijo}", saldo=0.0, usuario_id=usuario.id)
+        db.session.add(ganancia)
+
+    if not caja.id or not banco.id or not ganancia.id:
         db.session.commit()
 
     return [caja, banco]
@@ -355,7 +426,16 @@ def obtener_cuenta(slug, usuario=None):
     if cuenta:
         return cuenta
     sufijo = "" if usuario.es_admin else f"_{usuario.id}"
-    return CuentaContable.query.filter_by(usuario_id=usuario.id, slug=f"{slug}{sufijo}").first()
+    cuenta = CuentaContable.query.filter_by(usuario_id=usuario.id, slug=f"{slug}{sufijo}").first()
+    if cuenta:
+        return cuenta
+
+    # Si no existe la cuenta, crearla automáticamente para evitar errores de transferencia.
+    nombre = "Banco" if slug == "banco" else "Caja menor" if slug == "caja_menor" else slug.capitalize()
+    cuenta = CuentaContable(nombre=nombre, slug=f"{slug}{sufijo}", saldo=0.0, usuario_id=usuario.id)
+    db.session.add(cuenta)
+    db.session.commit()
+    return cuenta
 
 
 def ajustar_saldo_cuenta(cuenta, monto, descripcion, tipo, prestamo_id=None, pago_id=None):
@@ -371,6 +451,289 @@ def ajustar_saldo_cuenta(cuenta, monto, descripcion, tipo, prestamo_id=None, pag
     )
 
     db.session.add(movimiento)
+
+
+def calcular_liquidacion_cuota(cuota):
+    prestamo = cuota.prestamo
+    capital_admin = prestamo.capital_administrador
+    if not capital_admin:
+        raise ValueError("El préstamo no está vinculado a un capital entregado por el administrador.")
+    return calcular_distribucion_liquidacion(
+        capital_inicial=prestamo.monto,
+        numero_cuotas=prestamo.numero_cuotas,
+        tasa_admin=capital_admin.tasa_admin,
+        tasa_cliente=prestamo.interes_mensual,
+        capital_cuota=cuota.capital,
+    )
+
+
+@app.route("/api/liquidacion/simular")
+@login_required
+def simular_liquidacion():
+    try:
+        datos = calcular_distribucion_liquidacion(
+            capital_inicial=request.args.get("capital", type=float),
+            numero_cuotas=request.args.get("cuotas", type=int),
+            tasa_admin=request.args.get("tasa_admin", default=0, type=float),
+            tasa_cliente=request.args.get("tasa_cliente", type=float),
+        )
+    except (TypeError, ValueError) as error:
+        return jsonify({"error": str(error)}), 400
+    return jsonify(datos)
+
+
+@app.route("/liquidacion")
+@login_required
+def liquidaciones():
+    cuotas = Cuota.query.join(Cuota.prestamo).join(Prestamo.deudor)
+    if not current_user.es_admin:
+        cuotas = cuotas.filter(Deudor.usuario_id == current_user.id)
+    cuotas = cuotas.filter(
+        Prestamo.capital_prestamista_id.isnot(None),
+        Cuota.estado == "pagada",
+    ).order_by(Cuota.liquidado.asc(), Cuota.fecha_vencimiento.asc()).all()
+    capitales_query = CapitalPrestamista.query
+    if not current_user.es_admin:
+        capitales_query = capitales_query.filter_by(prestamista_id=current_user.id)
+    capitales = capitales_query.order_by(CapitalPrestamista.creado_en.desc()).all()
+    resumenes = []
+    for capital in capitales:
+        proyeccion = None
+        if capital.prestamo_cliente:
+            proyeccion = calcular_distribucion_liquidacion(
+                capital.monto,
+                capital.prestamo_cliente.numero_cuotas,
+                capital.tasa_admin,
+                capital.prestamo_cliente.interes_mensual,
+            )
+        resumenes.append({"capital": capital, "proyeccion": proyeccion})
+    return render_template("liquidaciones.html", cuotas=cuotas, resumenes=resumenes)
+
+
+@app.route('/admin/transferir', methods=['GET', 'POST'])
+@admin_required
+def transferir_prestamista():
+    prestamistas = Usuario.query.filter_by(rol='prestamista', activo=True).order_by(Usuario.nombre).all()
+    admin_usuario = Usuario.query.filter_by(rol='admin').first()
+    obtener_cuentas_contables(admin_usuario)
+    cuenta_admin = obtener_cuenta('banco', admin_usuario)
+
+    if request.method == 'POST':
+        prestamista_id = int(request.form.get('prestamista_id'))
+        monto = float(request.form.get('monto') or 0)
+        tasa_admin = float(request.form.get('tasa_admin') or 0)
+        plazo = int(request.form.get('plazo') or 0)
+
+        if monto <= 0 or tasa_admin < 0 or plazo <= 0:
+            flash('El monto y el plazo deben ser mayores a cero; la tasa no puede ser negativa.', 'error')
+            return redirect(url_for('transferir_prestamista'))
+
+        prestamista = Usuario.query.filter_by(id=prestamista_id, rol="prestamista", activo=True).first_or_404()
+        cuenta_prestamista_banco = obtener_cuenta('banco', prestamista)
+
+        if not cuenta_admin or (cuenta_admin.saldo or 0) < monto:
+            flash('Saldo insuficiente en la cuenta del administrador.', 'error')
+            return redirect(url_for('transferir_prestamista'))
+
+        if not cuenta_prestamista_banco:
+            cuenta_prestamista_banco = obtener_cuenta('banco', prestamista)
+
+        # mover fondos
+        ajustar_saldo_cuenta(cuenta_admin, -monto, f'Transferencia a {prestamista.nombre}', 'transferencia')
+        ajustar_saldo_cuenta(cuenta_prestamista_banco, monto, f'Transferencia desde admin', 'transferencia')
+
+        capital = CapitalPrestamista(
+            prestamista_id=prestamista.id,
+            monto=monto,
+            tasa_admin=tasa_admin,
+            plazo_meses=plazo,
+            saldo_pendiente=monto,
+            estado="disponible",
+        )
+        db.session.add(capital)
+
+        db.session.commit()
+        flash('Transferencia registrada correctamente.', 'success')
+        return redirect(url_for('cuentas'))
+
+    return render_template('transferir_prestamista.html', prestamistas=prestamistas, cuenta_admin=cuenta_admin)
+
+
+@app.route("/liquidacion/cuota/<int:cuota_id>", methods=["GET", "POST"])
+@login_required
+def liquidar_cuota(cuota_id):
+    cuota = cuota_visible_o_404(cuota_id)
+    prestamo = cuota.prestamo
+    prestamista = prestamo.deudor.propietario
+    capital_admin = prestamo.capital_administrador
+
+    if not capital_admin:
+        flash("Este préstamo no está vinculado a un capital del administrador.", "error")
+        return redirect(url_for("liquidaciones"))
+
+    try:
+        datos_liquidacion = calcular_liquidacion_cuota(cuota)
+    except ValueError as error:
+        flash(str(error), "error")
+        return redirect(url_for("liquidaciones"))
+
+    if request.method == "POST":
+        if cuota.estado != "pagada":
+            flash("Solo se puede liquidar una cuota que esté pagada.", "error")
+            return redirect(url_for("liquidar_cuota", cuota_id=cuota.id))
+
+        if cuota.liquidado:
+            flash("Esta cuota ya fue liquidada.", "error")
+            return redirect(url_for("liquidaciones"))
+
+        admin_total = datos_liquidacion["admin_total"]
+        ganancia_prestamista = datos_liquidacion["ganancia_prestamista"]
+
+        admin_usuario = Usuario.query.filter_by(rol="admin").first()
+        if not admin_usuario:
+            abort(500)
+
+        obtener_cuentas_contables(admin_usuario)
+        cuenta_admin = obtener_cuenta("banco", admin_usuario)
+        if not cuenta_admin:
+            abort(500)
+
+        cuenta_prestamista_banco = obtener_cuenta("banco", prestamista)
+        cuenta_prestamista_caja = obtener_cuenta("caja_menor", prestamista)
+
+        saldo_operativo = (cuenta_prestamista_banco.saldo or 0) + (cuenta_prestamista_caja.saldo or 0)
+        total_a_distribuir = admin_total + ganancia_prestamista
+        if saldo_operativo + 0.01 < total_a_distribuir:
+            flash(
+                "No está disponible el pago completo del cliente en las cuentas del prestamista. "
+                "La cuota no fue liquidada.",
+                "error",
+            )
+            return redirect(url_for("liquidar_cuota", cuota_id=cuota.id))
+
+        cantidad_restante = admin_total
+        fuentes = []
+        if cuenta_prestamista_banco and (cuenta_prestamista_banco.saldo or 0) > 0:
+            usado = min(cuenta_prestamista_banco.saldo, cantidad_restante)
+            fuentes.append((cuenta_prestamista_banco, usado))
+            cantidad_restante -= usado
+
+        if cantidad_restante > 0 and cuenta_prestamista_caja and (cuenta_prestamista_caja.saldo or 0) > 0:
+            usado = min(cuenta_prestamista_caja.saldo, cantidad_restante)
+            fuentes.append((cuenta_prestamista_caja, usado))
+            cantidad_restante -= usado
+
+        if cantidad_restante > 0:
+            flash(
+                "No hay saldo suficiente en las cuentas del prestamista para liquidar al administrador.",
+                "error"
+            )
+            return redirect(url_for("liquidar_cuota", cuota_id=cuota.id))
+
+        for cuenta, monto in fuentes:
+            if monto > 0:
+                ajustar_saldo_cuenta(
+                    cuenta,
+                    -monto,
+                    f"Liquidación capital cuota #{cuota.id} al administrador",
+                    "liquidacion",
+                    prestamo_id=prestamo.id
+                )
+
+        ajustar_saldo_cuenta(
+            cuenta_admin,
+            admin_total,
+            f"Liquidación capital cuota #{cuota.id} de {prestamista.nombre}",
+            "liquidacion",
+            prestamo_id=prestamo.id
+        )
+
+        # Separar la ganancia del prestamista a una cuenta específica 'ganancia'
+        cuenta_ganancia = obtener_cuenta('ganancia', prestamista)
+        ganancia_a_mover = ganancia_prestamista or 0
+        if ganancia_a_mover > 0:
+            restante_g = ganancia_a_mover
+            fuentes_g = []
+            if cuenta_prestamista_banco and (cuenta_prestamista_banco.saldo or 0) > 0:
+                usado = min(cuenta_prestamista_banco.saldo, restante_g)
+                fuentes_g.append((cuenta_prestamista_banco, usado))
+                restante_g -= usado
+
+            if restante_g > 0 and cuenta_prestamista_caja and (cuenta_prestamista_caja.saldo or 0) > 0:
+                usado = min(cuenta_prestamista_caja.saldo, restante_g)
+                fuentes_g.append((cuenta_prestamista_caja, usado))
+                restante_g -= usado
+
+            movido = 0
+            for cuenta, monto in fuentes_g:
+                if monto > 0:
+                    ajustar_saldo_cuenta(
+                        cuenta,
+                        -monto,
+                        f"Separación ganancia cuota #{cuota.id}",
+                        "transferencia_ganancia",
+                        prestamo_id=prestamo.id
+                    )
+                    movido += monto
+
+            if movido + 0.01 < ganancia_a_mover:
+                db.session.rollback()
+                flash("No fue posible separar la ganancia completa del prestamista.", "error")
+                return redirect(url_for("liquidar_cuota", cuota_id=cuota.id))
+
+            if movido > 0:
+                ajustar_saldo_cuenta(
+                    cuenta_ganancia,
+                    movido,
+                    f"Ganancia cuota #{cuota.id}",
+                    "ganancia",
+                    prestamo_id=prestamo.id
+                )
+
+        cuota.liquidado = True
+        cuota.tasa_admin = capital_admin.tasa_admin
+        cuota.ganancia_prestamista = ganancia_prestamista
+        cuota.fecha_liquidacion = datetime.utcnow()
+
+        capital_admin.capital_liquidado = (capital_admin.capital_liquidado or 0) + datos_liquidacion["capital_mensual"]
+        capital_admin.interes_liquidado = (capital_admin.interes_liquidado or 0) + datos_liquidacion["interes_admin"]
+        capital_admin.saldo_pendiente = max(
+            (capital_admin.saldo_pendiente or 0) - datos_liquidacion["capital_mensual"],
+            0,
+        )
+        if capital_admin.saldo_pendiente <= 0.01:
+            capital_admin.saldo_pendiente = 0
+            capital_admin.estado = "liquidado"
+
+        db.session.add(LiquidacionCapital(
+            cuota_id=cuota.id,
+            capital_prestamista_id=capital_admin.id,
+            capital_inicial=datos_liquidacion["capital_inicial"],
+            tasa_admin=datos_liquidacion["tasa_admin"],
+            tasa_cliente=datos_liquidacion["tasa_cliente"],
+            tasa_prestamista=datos_liquidacion["tasa_prestamista"],
+            capital_admin=datos_liquidacion["capital_mensual"],
+            interes_admin=datos_liquidacion["interes_admin"],
+            ganancia_prestamista=ganancia_prestamista,
+            pago_cliente=datos_liquidacion["cuota_cliente"],
+            total_admin=admin_total,
+            liquidado_por_id=current_user.id,
+        ))
+
+        db.session.commit()
+
+        flash(
+            f"Cuota liquidada. Admin recibe ${admin_total:,.0f} y el prestamista conserva ${ganancia_prestamista:,.0f}.",
+            "success"
+        )
+        return redirect(url_for("liquidaciones"))
+
+    return render_template(
+        "liquidar_cuota.html",
+        cuota=cuota,
+        prestamista=prestamista,
+        datos=datos_liquidacion,
+    )
 
 
 @app.route("/")
@@ -509,7 +872,8 @@ def cuentas():
         obtener_cuentas_contables()
         cuentas = CuentaContable.query.order_by(CuentaContable.usuario_id, CuentaContable.nombre).all()
     else:
-        cuentas = obtener_cuentas_contables()
+        obtener_cuentas_contables()
+        cuentas = CuentaContable.query.filter_by(usuario_id=current_user.id).order_by(CuentaContable.nombre).all()
 
     if request.method == "POST":
         cuenta_id = int(request.form.get("cuenta_id"))
@@ -534,7 +898,13 @@ def cuentas():
         flash(f"Se agregó ${monto:,.0f} a {cuenta.nombre}.", "success")
         return redirect(url_for("cuentas"))
 
-    return render_template("cuentas.html", cuentas=cuentas)
+    # admin helper: transferir a prestamista
+    transfer_link = None
+    if current_user.es_admin:
+        transfer_link = url_for('transferir_prestamista')
+
+    cuentas_inyectables = [cuenta for cuenta in cuentas if not cuenta.slug.startswith("ganancia")]
+    return render_template("cuentas.html", cuentas=cuentas, cuentas_inyectables=cuentas_inyectables)
 
 
 @app.route("/prestamistas")
@@ -690,6 +1060,14 @@ def editar_deudor(deudor_id):
 def eliminar_deudor(deudor_id):
     deudor = deudor_visible_o_404(deudor_id)
 
+    if any(cuota.liquidado for prestamo in deudor.prestamos for cuota in prestamo.cuotas):
+        flash("No se puede eliminar un cliente con liquidaciones de capital registradas.", "error")
+        return redirect(url_for("detalle_deudor", deudor_id=deudor.id))
+
+    for prestamo in deudor.prestamos:
+        if prestamo.capital_administrador:
+            prestamo.capital_administrador.estado = "disponible"
+
     db.session.delete(deudor)
     db.session.commit()
 
@@ -703,6 +1081,18 @@ def nuevo_prestamo(deudor_id):
     deudor = deudor_visible_o_404(deudor_id)
     propietario = deudor.propietario
     cuentas = obtener_cuentas_contables(propietario)
+    capitales_admin = CapitalPrestamista.query.filter_by(
+        prestamista_id=propietario.id,
+        estado="disponible",
+    ).order_by(CapitalPrestamista.creado_en.desc()).all()
+
+    def mostrar_formulario():
+        return render_template(
+            "nuevo_prestamo.html",
+            deudor=deudor,
+            cuentas=cuentas,
+            capitales_admin=capitales_admin,
+        )
 
     if request.method == "POST":
         monto = float(request.form.get("monto"))
@@ -712,14 +1102,47 @@ def nuevo_prestamo(deudor_id):
         monto_caja = float(request.form.get("monto_caja_menor") or 0)
         monto_banco = float(request.form.get("monto_banco") or 0)
         cuenta_slug = request.form.get("cuenta_desembolso") or "caja_menor"
+        capital_admin_id = request.form.get("capital_prestamista_id", type=int)
+        capital_admin = None
 
         if monto <= 0:
             flash("El monto del préstamo debe ser mayor a cero.", "error")
-            return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+            return mostrar_formulario()
+
+        if numero_cuotas <= 0 or interes_mensual < 0:
+            flash("El número de cuotas debe ser mayor a cero y la tasa no puede ser negativa.", "error")
+            return mostrar_formulario()
+
+        if capital_admin_id:
+            capital_admin = CapitalPrestamista.query.filter_by(
+                id=capital_admin_id,
+                prestamista_id=propietario.id,
+                estado="disponible",
+            ).first_or_404()
+            if abs(capital_admin.monto - monto) > 0.01:
+                flash("El préstamo al cliente debe usar el mismo capital entregado por el administrador.", "error")
+                return mostrar_formulario()
+            if capital_admin.plazo_meses and capital_admin.plazo_meses != numero_cuotas:
+                flash("El número de cuotas debe coincidir con el plazo del capital del administrador.", "error")
+                return mostrar_formulario()
+            if interes_mensual < capital_admin.tasa_admin:
+                flash("La tasa del cliente no puede ser menor que la tasa del administrador.", "error")
+                return mostrar_formulario()
+
+        try:
+            calculo_cuota = calcular_distribucion_liquidacion(
+                capital_inicial=monto,
+                numero_cuotas=numero_cuotas,
+                tasa_admin=capital_admin.tasa_admin if capital_admin else 0,
+                tasa_cliente=interes_mensual,
+            )
+        except ValueError as error:
+            flash(str(error), "error")
+            return mostrar_formulario()
 
         if monto_caja < 0 or monto_banco < 0:
             flash("Los montos de origen no pueden ser negativos.", "error")
-            return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+            return mostrar_formulario()
 
         sources = []
         total_fuentes = monto_caja + monto_banco
@@ -729,32 +1152,32 @@ def nuevo_prestamo(deudor_id):
 
             if not cuenta:
                 flash("Selecciona una cuenta válida para el desembolso.", "error")
-                return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+                return mostrar_formulario()
 
             sources = [(cuenta, monto)]
         else:
             if abs(total_fuentes - monto) > 0.01:
                 flash("La suma de los orígenes debe ser igual al monto total del préstamo.", "error")
-                return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+                return mostrar_formulario()
 
             if monto_caja > 0:
                 caja = obtener_cuenta("caja_menor", propietario)
                 if not caja:
                     flash("No se encontró la cuenta Caja menor.", "error")
-                    return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+                    return mostrar_formulario()
                 sources.append((caja, monto_caja))
 
             if monto_banco > 0:
                 banco = obtener_cuenta("banco", propietario)
                 if not banco:
                     flash("No se encontró la cuenta Banco.", "error")
-                    return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+                    return mostrar_formulario()
                 sources.append((banco, monto_banco))
 
         for cuenta, cantidad in sources:
             if cuenta.saldo < cantidad:
                 flash(f"Saldo insuficiente en {cuenta.nombre}: disponible ${cuenta.saldo:,.0f}.", "error")
-                return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+                return mostrar_formulario()
 
         prestamo = Prestamo(
             deudor_id=deudor.id,
@@ -764,8 +1187,12 @@ def nuevo_prestamo(deudor_id):
             dia_pago=dia_pago,
             saldo_capital=monto,
             estado="activo",
-            cuenta_desembolso_id=sources[0][0].id if len(sources) == 1 else None
+            cuenta_desembolso_id=sources[0][0].id if len(sources) == 1 else None,
+            capital_prestamista_id=capital_admin.id if capital_admin else None,
         )
+
+        if capital_admin:
+            capital_admin.estado = "colocado"
 
         db.session.add(prestamo)
         db.session.commit()
@@ -780,9 +1207,9 @@ def nuevo_prestamo(deudor_id):
             )
         db.session.commit()
 
-        capital_cuota = monto / numero_cuotas
-        interes_cuota = monto * (interes_mensual / 100)
-        total_cuota = capital_cuota + interes_cuota
+        capital_cuota = calculo_cuota["capital_mensual"]
+        interes_cuota = calculo_cuota["interes_admin"] + calculo_cuota["ganancia_prestamista"]
+        total_cuota = calculo_cuota["cuota_cliente"]
 
         hoy = date.today()
 
@@ -813,7 +1240,7 @@ def nuevo_prestamo(deudor_id):
         flash("Préstamo creado correctamente con cuotas mensuales", "success")
         return redirect(url_for("detalle_deudor", deudor_id=deudor.id))
 
-    return render_template("nuevo_prestamo.html", deudor=deudor, cuentas=cuentas)
+    return mostrar_formulario()
 
 
 @app.route("/pago/cuota/<int:cuota_id>", methods=["POST"])
@@ -945,6 +1372,12 @@ def pagar_cuota(cuota_id):
 @login_required
 def editar_cuota(cuota_id):
     cuota = cuota_visible_o_404(cuota_id)
+    if cuota.liquidado:
+        flash("Una cuota liquidada no puede modificarse.", "error")
+        return redirect(url_for("detalle_prestamo", prestamo_id=cuota.prestamo_id))
+    if cuota.prestamo.capital_administrador:
+        flash("Las cuotas financiadas con capital del administrador no pueden editarse manualmente.", "error")
+        return redirect(url_for("detalle_prestamo", prestamo_id=cuota.prestamo_id))
     pagos_existentes = Pago.query.filter_by(cuota_id=cuota.id).count()
 
     if pagos_existentes > 0:
@@ -1012,6 +1445,10 @@ def editar_pago(pago_id):
     prestamo = pago.prestamo
     cuota = pago.cuota
 
+    if cuota and cuota.liquidado:
+        flash("El pago no puede editarse porque su cuota ya fue liquidada.", "error")
+        return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
+
     if request.method == "POST":
         pago.monto = float(request.form.get("monto"))
         pago.capital_pagado = float(request.form.get("capital_pagado", 0))
@@ -1076,6 +1513,15 @@ def editar_prestamo(prestamo_id):
             monto_nuevo != prestamo.monto or
             numero_cuotas_nuevo != prestamo.numero_cuotas
         )
+
+        if prestamo.capital_administrador:
+            capital_admin = prestamo.capital_administrador
+            if abs(monto_nuevo - capital_admin.monto) > 0.01 or numero_cuotas_nuevo != capital_admin.plazo_meses:
+                flash("Monto y plazo deben conservar el acuerdo de capital del administrador.", "error")
+                return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
+            if interes_mensual < capital_admin.tasa_admin:
+                flash("La tasa del cliente no puede ser menor que la tasa del administrador.", "error")
+                return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
 
         if pagos_existentes > 0 and cambia_estructura:
             flash(
@@ -1202,6 +1648,10 @@ def refinanciar_prestamo(prestamo_id):
     prestamo_anterior = prestamo_visible_o_404(prestamo_id)
     deudor = prestamo_anterior.deudor
 
+    if prestamo_anterior.capital_administrador:
+        flash("Un préstamo con capital del administrador no puede refinanciarse desde este flujo.", "error")
+        return redirect(url_for("detalle_prestamo", prestamo_id=prestamo_id))
+
     if prestamo_anterior.estado in ("pagado", "refinanciado"):
         flash("Este préstamo no puede refinanciarse.", "error")
         return redirect(url_for("detalle_prestamo", prestamo_id=prestamo_id))
@@ -1288,6 +1738,12 @@ def refinanciar_prestamo(prestamo_id):
 def eliminar_prestamo(prestamo_id):
     prestamo = prestamo_visible_o_404(prestamo_id)
     deudor_id = prestamo.deudor_id
+
+    if any(cuota.liquidado for cuota in prestamo.cuotas):
+        flash("No se puede eliminar un préstamo con liquidaciones registradas.", "error")
+        return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
+    if prestamo.capital_administrador:
+        prestamo.capital_administrador.estado = "disponible"
 
     db.session.delete(prestamo)
     db.session.commit()

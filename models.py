@@ -89,6 +89,7 @@ class Prestamo(db.Model):
 
     deudor_id = db.Column(db.Integer, db.ForeignKey("deudores.id"), nullable=False)
     cuenta_desembolso_id = db.Column(db.Integer, db.ForeignKey("cuentas_contables.id"), nullable=True)
+    capital_prestamista_id = db.Column(db.Integer, db.ForeignKey("capital_prestamista.id"), nullable=True, unique=True)
 
     monto = db.Column(db.Float, nullable=False)
     interes_mensual = db.Column(db.Float, default=7.0)
@@ -145,12 +146,24 @@ class Cuota(db.Model):
     estado = db.Column(db.String(30), default="pendiente")
     # pendiente, pagada, parcial, solo_interes, vencida
 
+    liquidado = db.Column(db.Boolean, default=False, nullable=False)
+    tasa_admin = db.Column(db.Float, nullable=True)
+    ganancia_prestamista = db.Column(db.Float, default=0.0, nullable=False)
+    fecha_liquidacion = db.Column(db.DateTime, nullable=True)
+
     creado_en = db.Column(db.DateTime, default=datetime.utcnow)
 
     pagos = db.relationship(
         "Pago",
         backref="cuota",
         lazy=True
+    )
+
+    liquidacion = db.relationship(
+        "LiquidacionCapital",
+        backref="cuota",
+        uselist=False,
+        cascade="all, delete-orphan"
     )
 
 
@@ -180,3 +193,43 @@ class Pago(db.Model):
         backref="pagos_recibidos",
         foreign_keys=[cuenta_destino_id]
     )
+
+
+class CapitalPrestamista(db.Model):
+    __tablename__ = "capital_prestamista"
+
+    id = db.Column(db.Integer, primary_key=True)
+    prestamista_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=False)
+    monto = db.Column(db.Float, nullable=False)
+    tasa_admin = db.Column(db.Float, nullable=False)
+    plazo_meses = db.Column(db.Integer, nullable=True)
+    saldo_pendiente = db.Column(db.Float, nullable=False)
+    capital_liquidado = db.Column(db.Float, nullable=False, default=0.0)
+    interes_liquidado = db.Column(db.Float, nullable=False, default=0.0)
+    estado = db.Column(db.String(20), nullable=False, default="disponible")
+    creado_en = db.Column(db.DateTime, default=datetime.utcnow)
+
+    prestamista = db.relationship("Usuario", backref="capital_prestamos")
+    prestamo_cliente = db.relationship("Prestamo", backref="capital_administrador", uselist=False)
+
+
+class LiquidacionCapital(db.Model):
+    __tablename__ = "liquidaciones_capital"
+
+    id = db.Column(db.Integer, primary_key=True)
+    cuota_id = db.Column(db.Integer, db.ForeignKey("cuotas.id"), nullable=False, unique=True)
+    capital_prestamista_id = db.Column(db.Integer, db.ForeignKey("capital_prestamista.id"), nullable=False)
+    capital_inicial = db.Column(db.Float, nullable=False)
+    tasa_admin = db.Column(db.Float, nullable=False)
+    tasa_cliente = db.Column(db.Float, nullable=False)
+    tasa_prestamista = db.Column(db.Float, nullable=False)
+    capital_admin = db.Column(db.Float, nullable=False)
+    interes_admin = db.Column(db.Float, nullable=False)
+    ganancia_prestamista = db.Column(db.Float, nullable=False)
+    pago_cliente = db.Column(db.Float, nullable=False)
+    total_admin = db.Column(db.Float, nullable=False)
+    liquidado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=False)
+    creado_en = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    capital_origen = db.relationship("CapitalPrestamista", backref="liquidaciones")
+    liquidado_por = db.relationship("Usuario")

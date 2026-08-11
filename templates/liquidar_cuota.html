@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Liquidar Cuota | Solucione$ Paul{% endblock %}
+
+{% block content %}
+<section class="page-section">
+    <div class="page-header">
+        <div>
+            <h1>Liquidar cuota #{{ cuota.id }}</h1>
+            <p>Préstamo #{{ cuota.prestamo.id }} · Cliente: {{ cuota.prestamo.deudor.nombre }} · Prestamista: {{ prestamista.nombre }}</p>
+        </div>
+        <div>
+            <a href="{{ url_for('liquidaciones') }}" class="btn-small">← Volver a liquidaciones</a>
+        </div>
+    </div>
+
+    <div class="form-card">
+        <div class="metric-card"><span>Capital cuota</span><h2>${{ "{:,.0f}".format(cuota.capital) }}</h2></div>
+        <div class="metric-card"><span>Interés cuota</span><h2>${{ "{:,.0f}".format(cuota.interes) }}</h2></div>
+        <div class="metric-card"><span>Total cuota</span><h2>${{ "{:,.0f}".format(cuota.total) }}</h2></div>
+        <div class="metric-card"><span>Estado</span><h2>{{ cuota.estado }}</h2></div>
+        {% if cuota.liquidado %}
+        <div class="metric-card"><span>Tasa administrador</span><h2>{{ cuota.tasa_admin }}%</h2></div>
+        <div class="metric-card"><span>Ganancia prestamista</span><h2>${{ "{:,.0f}".format(cuota.ganancia_prestamista) }}</h2></div>
+        {% endif %}
+    </div>
+
+    {% if not cuota.liquidado %}
+    <div class="form-card">
+        <div class="simulator-card">
+            <h3>Distribución calculada</h3>
+            <div class="simulator-grid">
+                <div><span>Capital administrador</span><strong>${{ "{:,.0f}".format(datos.capital_mensual) }}</strong></div>
+                <div><span>Interés administrador ({{ datos.tasa_admin }}%)</span><strong>${{ "{:,.0f}".format(datos.interes_admin) }}</strong></div>
+                <div><span>Liquidación administrador</span><strong>${{ "{:,.0f}".format(datos.admin_total) }}</strong></div>
+                <div><span>Ganancia prestamista ({{ datos.tasa_prestamista }}%)</span><strong>${{ "{:,.0f}".format(datos.ganancia_prestamista) }}</strong></div>
+                <div><span>Pago total cliente</span><strong>${{ "{:,.0f}".format(datos.cuota_cliente) }}</strong></div>
+            </div>
+        </div>
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+                <small>La tasa del administrador fue fijada al entregar el capital. La tasa del cliente fue fijada al crear su préstamo.</small>
+            </div>
+
+            <div class="form-group">
+                <button type="submit" class="btn-primary">Liquidar cuota</button>
+            </div>
+        </form>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <h2>Esta cuota ya fue liquidada.</h2>
+        <p>Admin: {{ cuota.tasa_admin }}% · Ganancia prestamista: ${{ "{:,.0f}".format(cuota.ganancia_prestamista) }}</p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

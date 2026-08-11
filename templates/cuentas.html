@@ -34,7 +34,7 @@
                 <div class="form-group">
                     <label>Cuenta</label>
                     <select name="cuenta_id" required>
-                        {% for cuenta in cuentas %}
+                        {% for cuenta in cuentas_inyectables %}
                         <option value="{{ cuenta.id }}">{{ cuenta.nombre }}{% if current_user.es_admin %} · {{ cuenta.propietario.nombre }}{% endif %}</option>
                         {% endfor %}
                     </select>
@@ -51,6 +51,12 @@
             <button type="submit" class="btn-primary">Registrar inyección</button>
         </form>
     </div>
+
+    {% if current_user.es_admin %}
+    <div style="margin-top:1rem">
+        <a href="{{ url_for('transferir_prestamista') }}" class="btn-action">Transferir a prestamista</a>
+    </div>
+    {% endif %}
 
 </section>
 
