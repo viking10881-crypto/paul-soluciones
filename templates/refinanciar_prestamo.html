@@ -71,6 +71,20 @@
                            value="{{ prestamo.interes_mensual }}" required>
                 </div>
 
+                <div class="form-group">
+                    <label>Cuenta para entregar el dinero adicional</label>
+                    <select name="cuenta_desembolso" required>
+                        {% for cuenta in cuentas %}
+                        <option value="{{ cuenta.slug.replace('_' ~ deudor.usuario_id, '') }}">
+                            {{ cuenta.nombre }} — disponible ${{ "{:,.0f}".format(cuenta.saldo) }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <small style="color: var(--color-text-muted, #94a3b8); margin-top: .25rem; display: block;">
+                        Solo se descontará la diferencia entre el nuevo monto y el saldo pendiente.
+                    </small>
+                </div>
+
             </div>
 
             <!-- SIMULACIÓN -->

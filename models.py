@@ -1,8 +1,18 @@
 from datetime import datetime, date
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
+from sqlalchemy.types import TypeDecorator, Numeric
 
 db = SQLAlchemy()
+
+
+class Dinero(TypeDecorator):
+    """NUMERIC exacto en la base, compatible con los valores usados por las vistas."""
+    impl = Numeric(18, 2)
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        return float(value) if value is not None else None
 
 
 class Usuario(db.Model, UserMixin):
@@ -35,7 +45,7 @@ class CuentaContable(db.Model):
     usuario_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True, index=True)
     nombre = db.Column(db.String(100), nullable=False)
     slug = db.Column(db.String(50), nullable=False, unique=True)
-    saldo = db.Column(db.Float, default=0.0, nullable=False)
+    saldo = db.Column(Dinero(), default=0.0, nullable=False)
     creado_en = db.Column(db.DateTime, default=datetime.utcnow)
 
     movimientos = db.relationship(
@@ -54,7 +64,7 @@ class CuentaMovimiento(db.Model):
     prestamo_id = db.Column(db.Integer, db.ForeignKey("prestamos.id"), nullable=True)
     pago_id = db.Column(db.Integer, db.ForeignKey("pagos.id"), nullable=True)
     tipo = db.Column(db.String(50), nullable=False)
-    monto = db.Column(db.Float, nullable=False)
+    monto = db.Column(Dinero(), nullable=False)
     descripcion = db.Column(db.String(200))
     fecha = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -91,14 +101,14 @@ class Prestamo(db.Model):
     cuenta_desembolso_id = db.Column(db.Integer, db.ForeignKey("cuentas_contables.id"), nullable=True)
     capital_prestamista_id = db.Column(db.Integer, db.ForeignKey("capital_prestamista.id"), nullable=True, unique=True)
 
-    monto = db.Column(db.Float, nullable=False)
+    monto = db.Column(Dinero(), nullable=False)
     interes_mensual = db.Column(db.Float, default=7.0)
     numero_cuotas = db.Column(db.Integer, nullable=False)
 
     fecha_inicio = db.Column(db.Date, default=date.today)
     dia_pago = db.Column(db.Integer, nullable=False)
 
-    saldo_capital = db.Column(db.Float, nullable=False)
+    saldo_capital = db.Column(Dinero(), nullable=False)
     estado = db.Column(db.String(30), default="activo")  
     # activo, pagado, atrasado
 
@@ -136,19 +146,19 @@ class Cuota(db.Model):
 
     fecha_vencimiento = db.Column(db.Date, nullable=False)
 
-    capital = db.Column(db.Float, nullable=False)
-    interes = db.Column(db.Float, nullable=False)
-    total = db.Column(db.Float, nullable=False)
+    capital = db.Column(Dinero(), nullable=False)
+    interes = db.Column(Dinero(), nullable=False)
+    total = db.Column(Dinero(), nullable=False)
 
-    pagado_capital = db.Column(db.Float, default=0)
-    pagado_interes = db.Column(db.Float, default=0)
+    pagado_capital = db.Column(Dinero(), default=0)
+    pagado_interes = db.Column(Dinero(), default=0)
 
     estado = db.Column(db.String(30), default="pendiente")
     # pendiente, pagada, parcial, solo_interes, vencida
 
     liquidado = db.Column(db.Boolean, default=False, nullable=False)
     tasa_admin = db.Column(db.Float, nullable=True)
-    ganancia_prestamista = db.Column(db.Float, default=0.0, nullable=False)
+    ganancia_prestamista = db.Column(Dinero(), default=0.0, nullable=False)
     fecha_liquidacion = db.Column(db.DateTime, nullable=True)
 
     creado_en = db.Column(db.DateTime, default=datetime.utcnow)
@@ -179,10 +189,10 @@ class Pago(db.Model):
     tipo_pago = db.Column(db.String(50), nullable=False)
     # cuota_completa, solo_interes, abono_capital, abono_parcial
 
-    monto = db.Column(db.Float, nullable=False)
+    monto = db.Column(Dinero(), nullable=False)
 
-    capital_pagado = db.Column(db.Float, default=0)
-    interes_pagado = db.Column(db.Float, default=0)
+    capital_pagado = db.Column(Dinero(), default=0)
+    interes_pagado = db.Column(Dinero(), default=0)
 
     nota = db.Column(db.Text)
 
@@ -200,12 +210,12 @@ class CapitalPrestamista(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     prestamista_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=False)
-    monto = db.Column(db.Float, nullable=False)
+    monto = db.Column(Dinero(), nullable=False)
     tasa_admin = db.Column(db.Float, nullable=False)
     plazo_meses = db.Column(db.Integer, nullable=True)
-    saldo_pendiente = db.Column(db.Float, nullable=False)
-    capital_liquidado = db.Column(db.Float, nullable=False, default=0.0)
-    interes_liquidado = db.Column(db.Float, nullable=False, default=0.0)
+    saldo_pendiente = db.Column(Dinero(), nullable=False)
+    capital_liquidado = db.Column(Dinero(), nullable=False, default=0.0)
+    interes_liquidado = db.Column(Dinero(), nullable=False, default=0.0)
     estado = db.Column(db.String(20), nullable=False, default="disponible")
     creado_en = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -219,15 +229,15 @@ class LiquidacionCapital(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     cuota_id = db.Column(db.Integer, db.ForeignKey("cuotas.id"), nullable=False, unique=True)
     capital_prestamista_id = db.Column(db.Integer, db.ForeignKey("capital_prestamista.id"), nullable=False)
-    capital_inicial = db.Column(db.Float, nullable=False)
+    capital_inicial = db.Column(Dinero(), nullable=False)
     tasa_admin = db.Column(db.Float, nullable=False)
     tasa_cliente = db.Column(db.Float, nullable=False)
     tasa_prestamista = db.Column(db.Float, nullable=False)
-    capital_admin = db.Column(db.Float, nullable=False)
-    interes_admin = db.Column(db.Float, nullable=False)
-    ganancia_prestamista = db.Column(db.Float, nullable=False)
-    pago_cliente = db.Column(db.Float, nullable=False)
-    total_admin = db.Column(db.Float, nullable=False)
+    capital_admin = db.Column(Dinero(), nullable=False)
+    interes_admin = db.Column(Dinero(), nullable=False)
+    ganancia_prestamista = db.Column(Dinero(), nullable=False)
+    pago_cliente = db.Column(Dinero(), nullable=False)
+    total_admin = db.Column(Dinero(), nullable=False)
     liquidado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=False)
     creado_en = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 

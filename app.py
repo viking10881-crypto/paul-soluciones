@@ -1,6 +1,7 @@
 import os
 import hmac
 import secrets
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import wraps
 from types import SimpleNamespace
 from datetime import date, datetime, timedelta
@@ -52,6 +53,29 @@ login_manager.login_view = "login"
 login_manager.login_message = "Debes iniciar sesión para continuar."
 
 _esquema_preparado = False
+CENTAVO = Decimal("0.01")
+
+
+def dinero(valor, campo="monto"):
+    """Convierte una entrada monetaria y la normaliza a dos decimales."""
+    try:
+        numero = Decimal(str(valor)).quantize(CENTAVO, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError(f"El {campo} no es válido.")
+    if not numero.is_finite():
+        raise ValueError(f"El {campo} no es válido.")
+    return numero
+
+
+def como_float(valor):
+    return float(dinero(valor))
+
+
+def cuenta_bloqueada(cuenta_id, usuario_id):
+    """Bloquea la fila en PostgreSQL hasta terminar la transacción."""
+    return CuentaContable.query.filter_by(
+        id=cuenta_id, usuario_id=usuario_id
+    ).with_for_update().first()
 
 
 def csrf_token():
@@ -334,6 +358,29 @@ def asegurar_esquema():
             conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS interes_liquidado FLOAT NOT NULL DEFAULT 0.0"))
             conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'disponible'"))
 
+            # El dinero se almacena con precisión decimal; USING redondea cualquier
+            # residuo binario legado sin alterar el valor visible a dos decimales.
+            columnas_dinero = {
+                "cuentas_contables": ("saldo",),
+                "cuenta_movimientos": ("monto",),
+                "prestamos": ("monto", "saldo_capital"),
+                "cuotas": ("capital", "interes", "total", "pagado_capital", "pagado_interes", "ganancia_prestamista"),
+                "pagos": ("monto", "capital_pagado", "interes_pagado"),
+                "capital_prestamista": ("monto", "saldo_pendiente", "capital_liquidado", "interes_liquidado"),
+                "liquidaciones_capital": ("capital_inicial", "capital_admin", "interes_admin", "ganancia_prestamista", "pago_cliente", "total_admin"),
+            }
+            for tabla, columnas in columnas_dinero.items():
+                for columna in columnas:
+                    tipo_actual = conn.execute(text(
+                        "SELECT data_type FROM information_schema.columns "
+                        "WHERE table_schema = current_schema() AND table_name = :tabla AND column_name = :columna"
+                    ), {"tabla": tabla, "columna": columna}).scalar()
+                    if tipo_actual and tipo_actual != "numeric":
+                        conn.execute(text(
+                            f"ALTER TABLE {tabla} ALTER COLUMN {columna} TYPE NUMERIC(18,2) "
+                            f"USING ROUND({columna}::numeric, 2)"
+                        ))
+
             conn.commit()
 
         else:
@@ -422,6 +469,8 @@ def obtener_cuentas_contables(usuario=None):
 
 def obtener_cuenta(slug, usuario=None):
     usuario = usuario or current_user
+    if slug not in {"banco", "caja_menor", "ganancia"}:
+        return None
     cuenta = CuentaContable.query.filter_by(usuario_id=usuario.id, slug=slug).first()
     if cuenta:
         return cuenta
@@ -439,7 +488,8 @@ def obtener_cuenta(slug, usuario=None):
 
 
 def ajustar_saldo_cuenta(cuenta, monto, descripcion, tipo, prestamo_id=None, pago_id=None):
-    cuenta.saldo = (cuenta.saldo or 0) + monto
+    monto = como_float(monto)
+    cuenta.saldo = como_float(dinero(cuenta.saldo or 0) + dinero(monto))
 
     movimiento = CuentaMovimiento(
         cuenta_id=cuenta.id,
@@ -582,6 +632,18 @@ def transferir_prestamista():
         prestamista = Usuario.query.filter_by(id=prestamista_id, rol="prestamista", activo=True).first_or_404()
         banco_prestamista = obtener_cuenta('banco', prestamista)
         caja_prestamista = obtener_cuenta('caja_menor', prestamista)
+
+        # Serializa transferencias simultáneas que consumen las mismas cuentas.
+        ids_cuentas = sorted({banco_admin.id, caja_admin.id, banco_prestamista.id, caja_prestamista.id})
+        bloqueadas = {
+            cuenta.id: cuenta for cuenta in CuentaContable.query.filter(
+                CuentaContable.id.in_(ids_cuentas)
+            ).order_by(CuentaContable.id).with_for_update().all()
+        }
+        banco_admin = bloqueadas[banco_admin.id]
+        caja_admin = bloqueadas[caja_admin.id]
+        banco_prestamista = bloqueadas[banco_prestamista.id]
+        caja_prestamista = bloqueadas[caja_prestamista.id]
 
         if (banco_admin.saldo or 0) < monto_banco:
             flash(f'Saldo insuficiente en Banco del administrador: disponible ${banco_admin.saldo:,.0f}.', 'error')
@@ -1179,8 +1241,16 @@ def editar_deudor(deudor_id):
 def eliminar_deudor(deudor_id):
     deudor = deudor_visible_o_404(deudor_id)
 
-    if any(cuota.liquidado for prestamo in deudor.prestamos for cuota in prestamo.cuotas):
-        flash("No se puede eliminar un cliente con liquidaciones de capital registradas.", "error")
+    ids = [prestamo.id for prestamo in deudor.prestamos]
+    tiene_historial = any(prestamo.pagos for prestamo in deudor.prestamos)
+    tiene_historial = tiene_historial or (ids and CuentaMovimiento.query.filter(
+        CuentaMovimiento.prestamo_id.in_(ids)
+    ).first() is not None)
+    tiene_historial = tiene_historial or any(
+        cuota.liquidado for prestamo in deudor.prestamos for cuota in prestamo.cuotas
+    )
+    if tiene_historial:
+        flash("No se puede eliminar un cliente con pagos o movimientos contables. Conserva el historial financiero.", "error")
         return redirect(url_for("detalle_deudor", deudor_id=deudor.id))
 
     for prestamo in deudor.prestamos:
@@ -1247,7 +1317,7 @@ def nuevo_prestamo(deudor_id):
                 id=capital_admin_id,
                 prestamista_id=propietario.id,
                 estado="disponible",
-            ).first_or_404()
+            ).with_for_update().first_or_404()
             if abs(capital_admin.monto - monto) > 0.01:
                 flash("El préstamo al cliente debe usar el mismo capital entregado por el administrador.", "error")
                 return mostrar_formulario()
@@ -1304,9 +1374,19 @@ def nuevo_prestamo(deudor_id):
                 sources.append((banco, monto_banco))
 
         for cuenta, cantidad in sources:
+            cuenta_bloqueada_actual = cuenta_bloqueada(cuenta.id, propietario.id)
+            if not cuenta_bloqueada_actual:
+                flash("No se encontró una de las cuentas seleccionadas.", "error")
+                db.session.rollback()
+                return mostrar_formulario()
+            cuenta = cuenta_bloqueada_actual
             if cuenta.saldo < cantidad:
                 flash(f"Saldo insuficiente en {cuenta.nombre}: disponible ${cuenta.saldo:,.0f}.", "error")
+                db.session.rollback()
                 return mostrar_formulario()
+
+        # Sustituir las instancias por sus filas bloqueadas antes de descontar.
+        sources = [(cuenta_bloqueada(cuenta.id, propietario.id), cantidad) for cuenta, cantidad in sources]
 
         prestamo = Prestamo(
             deudor_id=deudor.id,
@@ -1376,10 +1456,19 @@ def nuevo_prestamo(deudor_id):
 @login_required
 def pagar_cuota(cuota_id):
     cuota = cuota_visible_o_404(cuota_id)
+    db.session.refresh(cuota, with_for_update=True)
     prestamo = cuota.prestamo
 
     tipo_pago = request.form.get("tipo_pago")
-    monto = float(request.form.get("monto"))
+    try:
+        monto_d = dinero(request.form.get("monto"))
+    except ValueError as error:
+        flash(str(error), "error")
+        return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+    if monto_d <= 0:
+        flash("El monto del pago debe ser mayor a cero.", "error")
+        return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+    monto = float(monto_d)
     nota = request.form.get("nota")
     cuenta_slug = request.form.get("cuenta_destino") or "caja_menor"
     cuenta_destino = obtener_cuenta(cuenta_slug, prestamo.deudor.propietario)
@@ -1387,13 +1476,24 @@ def pagar_cuota(cuota_id):
     if not cuenta_destino:
         flash("Selecciona una cuenta destino válida para este pago.", "error")
         return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+    cuenta_destino = cuenta_bloqueada(cuenta_destino.id, prestamo.deudor.usuario_id)
+
+    restante_capital = max(como_float(dinero(cuota.capital) - dinero(cuota.pagado_capital or 0)), 0)
+    restante_interes = max(como_float(dinero(cuota.interes) - dinero(cuota.pagado_interes or 0)), 0)
+    restante_total = como_float(dinero(restante_capital) + dinero(restante_interes))
+    if restante_total <= 0:
+        flash("Esta cuota ya no tiene valores pendientes.", "error")
+        return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
 
     capital_pagado = 0
     interes_pagado = 0
 
     if tipo_pago == "cuota_completa":
-        capital_pagado = cuota.capital - cuota.pagado_capital
-        interes_pagado = cuota.interes - cuota.pagado_interes
+        if abs(monto - restante_total) > 0.009:
+            flash(f"Para pagar la cuota completa debes registrar exactamente ${restante_total:,.2f}.", "error")
+            return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+        capital_pagado = restante_capital
+        interes_pagado = restante_interes
 
         # Validar que no supere el saldo pendiente del préstamo
         if capital_pagado > prestamo.saldo_capital:
@@ -1405,8 +1505,14 @@ def pagar_cuota(cuota_id):
         cuota.estado = "pagada"
 
     elif tipo_pago == "solo_interes":
-        interes_pagado = cuota.interes
-        cuota.pagado_interes += interes_pagado
+        if restante_interes <= 0:
+            flash("El interés de esta cuota ya fue pagado.", "error")
+            return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+        if abs(monto - restante_interes) > 0.009:
+            flash(f"El pago de solo interés debe ser exactamente ${restante_interes:,.2f}.", "error")
+            return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+        interes_pagado = restante_interes
+        cuota.pagado_interes = como_float(dinero(cuota.pagado_interes or 0) + dinero(interes_pagado))
         cuota.estado = "solo_interes"
 
         def avanzar_mes(fecha, meses=1):
@@ -1434,16 +1540,17 @@ def pagar_cuota(cuota_id):
         capital_pagado = monto
         
         # Validar que no supere el saldo pendiente del préstamo
-        if capital_pagado > prestamo.saldo_capital:
+        if capital_pagado > restante_capital or capital_pagado > prestamo.saldo_capital:
             flash(f"Error: Intenta pagar ${capital_pagado:,.0f} de capital pero solo hay ${prestamo.saldo_capital:,.0f} pendiente.", "error")
             return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
         
-        cuota.pagado_capital += capital_pagado
-        if cuota.pagado_capital > cuota.capital:
-            cuota.pagado_capital = cuota.capital
+        cuota.pagado_capital = como_float(dinero(cuota.pagado_capital or 0) + dinero(capital_pagado))
+        cuota.estado = "pagada" if cuota.pagado_capital >= cuota.capital and cuota.pagado_interes >= cuota.interes else "parcial"
 
     elif tipo_pago == "abono_parcial":
-        restante_interes = cuota.interes - cuota.pagado_interes
+        if monto > restante_total:
+            flash(f"El abono no puede superar el pendiente de la cuota (${restante_total:,.2f}).", "error")
+            return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
 
         if monto <= restante_interes:
             interes_pagado = monto
@@ -1464,6 +1571,16 @@ def pagar_cuota(cuota_id):
 
         if cuota.pagado_capital >= cuota.capital and cuota.pagado_interes >= cuota.interes:
             cuota.estado = "pagada"
+    else:
+        flash("Selecciona un tipo de pago válido.", "error")
+        return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
+
+    capital_pagado = como_float(capital_pagado)
+    interes_pagado = como_float(interes_pagado)
+    if abs(monto - como_float(dinero(capital_pagado) + dinero(interes_pagado))) > 0.009:
+        flash("El monto debe coincidir con la suma aplicada a capital e interés.", "error")
+        db.session.rollback()
+        return redirect(url_for("detalle_deudor", deudor_id=prestamo.deudor_id))
 
     pago = Pago(
         prestamo_id=prestamo.id,
@@ -1571,6 +1688,7 @@ def detalle_prestamo(prestamo_id):
 @login_required
 def editar_pago(pago_id):
     pago = pago_visible_o_404(pago_id)
+    db.session.refresh(pago, with_for_update=True)
     prestamo = pago.prestamo
     cuota = pago.cuota
 
@@ -1579,9 +1697,35 @@ def editar_pago(pago_id):
         return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
 
     if request.method == "POST":
-        pago.monto = float(request.form.get("monto"))
-        pago.capital_pagado = float(request.form.get("capital_pagado", 0))
-        pago.interes_pagado = float(request.form.get("interes_pagado", 0))
+        try:
+            monto_nuevo = dinero(request.form.get("monto"))
+            capital_nuevo = dinero(request.form.get("capital_pagado", 0))
+            interes_nuevo = dinero(request.form.get("interes_pagado", 0))
+        except ValueError as error:
+            flash(str(error), "error")
+            return redirect(url_for("editar_pago", pago_id=pago.id))
+        if monto_nuevo <= 0 or capital_nuevo < 0 or interes_nuevo < 0:
+            flash("Los valores del pago no pueden ser negativos y el total debe ser mayor a cero.", "error")
+            return redirect(url_for("editar_pago", pago_id=pago.id))
+        if monto_nuevo != capital_nuevo + interes_nuevo:
+            flash("El monto total debe ser igual a capital más interés.", "error")
+            return redirect(url_for("editar_pago", pago_id=pago.id))
+
+        cuenta = cuenta_bloqueada(pago.cuenta_destino_id, prestamo.deudor.usuario_id)
+        movimiento = CuentaMovimiento.query.filter_by(pago_id=pago.id).with_for_update().first()
+        if not cuenta or not movimiento:
+            flash("No se encontró el movimiento contable asociado; el pago no fue modificado.", "error")
+            db.session.rollback()
+            return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
+        diferencia = monto_nuevo - dinero(pago.monto)
+        if dinero(cuenta.saldo or 0) + diferencia < 0:
+            flash("La cuenta no tiene saldo suficiente para reducir este pago.", "error")
+            db.session.rollback()
+            return redirect(url_for("editar_pago", pago_id=pago.id))
+
+        pago.monto = float(monto_nuevo)
+        pago.capital_pagado = float(capital_nuevo)
+        pago.interes_pagado = float(interes_nuevo)
         pago.nota = request.form.get("nota")
 
         # Reconstruir pagado_capital y pagado_interes de la cuota
@@ -1600,6 +1744,9 @@ def editar_pago(pago_id):
             if cuota.pagado_interes > cuota.interes:
                 flash(f"Error: Intenta pagar ${cuota.pagado_interes:,.0f} de interés pero la cuota solo es ${cuota.interes:,.0f}.", "error")
                 return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
+
+            cuenta.saldo = como_float(dinero(cuenta.saldo or 0) + diferencia)
+            movimiento.monto = float(monto_nuevo)
 
             # Normalizar por si los valores superan lo esperado
             cuota.pagado_capital = min(cuota.pagado_capital, cuota.capital)
@@ -1786,10 +1933,18 @@ def refinanciar_prestamo(prestamo_id):
         return redirect(url_for("detalle_prestamo", prestamo_id=prestamo_id))
 
     if request.method == "POST":
-        monto_nuevo = float(request.form.get("monto"))
-        numero_cuotas = int(request.form.get("numero_cuotas"))
-        dia_pago = int(request.form.get("dia_pago"))
-        interes_mensual = float(request.form.get("interes_mensual", 7.0))
+        try:
+            monto_nuevo = como_float(request.form.get("monto"))
+            numero_cuotas = int(request.form.get("numero_cuotas"))
+            dia_pago = int(request.form.get("dia_pago"))
+            interes_mensual = float(request.form.get("interes_mensual", 7.0))
+        except (ValueError, TypeError):
+            flash("Revisa el monto, las cuotas, la tasa y el día de pago.", "error")
+            return render_template("refinanciar_prestamo.html", prestamo=prestamo_anterior, deudor=deudor, cuentas=obtener_cuentas_contables(deudor.propietario))
+
+        if monto_nuevo <= 0 or numero_cuotas <= 0 or not 1 <= dia_pago <= 31 or not 0 <= interes_mensual <= 100:
+            flash("Los datos del refinanciamiento no son válidos.", "error")
+            return render_template("refinanciar_prestamo.html", prestamo=prestamo_anterior, deudor=deudor, cuentas=obtener_cuentas_contables(deudor.propietario))
 
         saldo_pendiente = prestamo_anterior.saldo_capital
 
@@ -1799,14 +1954,26 @@ def refinanciar_prestamo(prestamo_id):
                 f"al saldo pendiente (${saldo_pendiente:,.0f}).",
                 "error"
             )
-            return render_template("refinanciar_prestamo.html", prestamo=prestamo_anterior, deudor=deudor)
+            return render_template("refinanciar_prestamo.html", prestamo=prestamo_anterior, deudor=deudor, cuentas=obtener_cuentas_contables(deudor.propietario))
 
-        # Cerrar préstamo anterior
+        efectivo = como_float(dinero(monto_nuevo) - dinero(saldo_pendiente))
+        cuenta = None
+        if efectivo > 0:
+            cuenta_slug = request.form.get("cuenta_desembolso")
+            cuenta_encontrada = obtener_cuenta(cuenta_slug, deudor.propietario)
+            if not cuenta_encontrada:
+                flash("Selecciona una cuenta válida para entregar el dinero adicional.", "error")
+                return render_template("refinanciar_prestamo.html", prestamo=prestamo_anterior, deudor=deudor, cuentas=obtener_cuentas_contables(deudor.propietario))
+            cuenta = cuenta_bloqueada(cuenta_encontrada.id, deudor.usuario_id)
+            if dinero(cuenta.saldo or 0) < dinero(efectivo):
+                flash(f"Saldo insuficiente en {cuenta.nombre}: disponible ${cuenta.saldo:,.2f}.", "error")
+                db.session.rollback()
+                return render_template("refinanciar_prestamo.html", prestamo=prestamo_anterior, deudor=deudor, cuentas=obtener_cuentas_contables(deudor.propietario))
+
+        # Cerrar la obligación anterior sin inventar pagos ni recaudos.
         for cuota in prestamo_anterior.cuotas:
             if cuota.estado != "pagada":
-                cuota.pagado_capital = cuota.capital
-                cuota.pagado_interes = cuota.interes
-                cuota.estado = "pagada"
+                cuota.estado = "refinanciada"
 
         prestamo_anterior.saldo_capital = 0
         prestamo_anterior.estado = "refinanciado"
@@ -1823,6 +1990,15 @@ def refinanciar_prestamo(prestamo_id):
         )
         db.session.add(nuevo_prestamo)
         db.session.flush()
+
+        if cuenta and efectivo > 0:
+            ajustar_saldo_cuenta(
+                cuenta,
+                -efectivo,
+                f"Efectivo adicional refinanciación #{prestamo_anterior.id} → #{nuevo_prestamo.id}",
+                "refinanciacion",
+                prestamo_id=nuevo_prestamo.id,
+            )
 
         capital_cuota = monto_nuevo / numero_cuotas
         interes_cuota = monto_nuevo * (interes_mensual / 100)
@@ -1850,7 +2026,6 @@ def refinanciar_prestamo(prestamo_id):
 
         db.session.commit()
 
-        efectivo = monto_nuevo - saldo_pendiente
         flash(
             f"Refinanciamiento exitoso. Saldo absorbido: ${saldo_pendiente:,.0f}. "
             f"Efectivo entregado al cliente: ${efectivo:,.0f}. "
@@ -1859,7 +2034,12 @@ def refinanciar_prestamo(prestamo_id):
         )
         return redirect(url_for("detalle_deudor", deudor_id=deudor.id))
 
-    return render_template("refinanciar_prestamo.html", prestamo=prestamo_anterior, deudor=deudor)
+    return render_template(
+        "refinanciar_prestamo.html",
+        prestamo=prestamo_anterior,
+        deudor=deudor,
+        cuentas=obtener_cuentas_contables(deudor.propietario),
+    )
 
 
 @app.route("/prestamo/eliminar/<int:prestamo_id>", methods=["POST"])
@@ -1868,8 +2048,9 @@ def eliminar_prestamo(prestamo_id):
     prestamo = prestamo_visible_o_404(prestamo_id)
     deudor_id = prestamo.deudor_id
 
-    if any(cuota.liquidado for cuota in prestamo.cuotas):
-        flash("No se puede eliminar un préstamo con liquidaciones registradas.", "error")
+    tiene_movimientos = CuentaMovimiento.query.filter_by(prestamo_id=prestamo.id).first() is not None
+    if prestamo.pagos or tiene_movimientos or any(cuota.liquidado for cuota in prestamo.cuotas):
+        flash("No se puede eliminar un préstamo con pagos o movimientos contables. Conserva el historial financiero.", "error")
         return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
     if prestamo.capital_administrador:
         prestamo.capital_administrador.estado = "disponible"
