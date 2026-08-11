@@ -68,11 +68,11 @@
             <h2>Préstamos</h2>
         </div>
 
-        {% if deudor.prestamos %}
+        {% if prestamos_ordenados %}
 
             <div class="prestamos-grid">
 
-                {% for prestamo in deudor.prestamos %}
+                {% for prestamo in prestamos_ordenados %}
 
                 <div class="prestamo-card">
 

@@ -1081,7 +1081,30 @@ def nuevo_deudor():
 @login_required
 def detalle_deudor(deudor_id):
     deudor = deudor_visible_o_404(deudor_id)
-    return render_template("detalle_deudor.html", deudor=deudor)
+    prestamos_abiertos = sorted(
+        (p for p in deudor.prestamos if p.estado in ("activo", "atrasado")),
+        key=lambda p: (p.creado_en or datetime.min, p.id),
+        reverse=True,
+    )
+    prestamos_refinanciados = sorted(
+        (p for p in deudor.prestamos if p.estado == "refinanciado"),
+        key=lambda p: (p.creado_en or datetime.min, p.id),
+        reverse=True,
+    )
+    prestamos_pagados = sorted(
+        (p for p in deudor.prestamos if p.estado == "pagado"),
+        key=lambda p: (
+            max((pago.fecha_pago for pago in p.pagos), default=p.creado_en or datetime.min),
+            p.id,
+        ),
+        reverse=True,
+    )
+    prestamos_ordenados = prestamos_abiertos + prestamos_refinanciados + prestamos_pagados
+    return render_template(
+        "detalle_deudor.html",
+        deudor=deudor,
+        prestamos_ordenados=prestamos_ordenados,
+    )
 
 
 @app.route("/deudores/editar/<int:deudor_id>", methods=["GET", "POST"])
