@@ -1191,25 +1191,18 @@ def nuevo_deudor():
 @login_required
 def detalle_deudor(deudor_id):
     deudor = deudor_visible_o_404(deudor_id)
-    prestamos_abiertos = sorted(
-        (p for p in deudor.prestamos if p.estado in ("activo", "atrasado")),
+
+    def clave_orden(prestamo):
+        estado = (prestamo.estado or "activo").strip().lower()
+        # Activos y atrasados son cartera vigente; pagados siempre van al final.
+        return 2 if estado == "pagado" else 1 if estado == "refinanciado" else 0
+
+    prestamos_recientes = sorted(
+        deudor.prestamos,
         key=lambda p: (p.creado_en or datetime.min, p.id),
         reverse=True,
     )
-    prestamos_refinanciados = sorted(
-        (p for p in deudor.prestamos if p.estado == "refinanciado"),
-        key=lambda p: (p.creado_en or datetime.min, p.id),
-        reverse=True,
-    )
-    prestamos_pagados = sorted(
-        (p for p in deudor.prestamos if p.estado == "pagado"),
-        key=lambda p: (
-            max((pago.fecha_pago for pago in p.pagos), default=p.creado_en or datetime.min),
-            p.id,
-        ),
-        reverse=True,
-    )
-    prestamos_ordenados = prestamos_abiertos + prestamos_refinanciados + prestamos_pagados
+    prestamos_ordenados = sorted(prestamos_recientes, key=clave_orden)
     return render_template(
         "detalle_deudor.html",
         deudor=deudor,

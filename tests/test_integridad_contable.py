@@ -115,3 +115,19 @@ def test_no_elimina_prestamo_con_historial_contable(escenario_contable):
     client.post(f"/prestamo/eliminar/{ids['prestamo']}")
     with app.app_context():
         assert db.session.get(Prestamo, ids["prestamo"]) is not None
+
+
+def test_detalle_muestra_activos_antes_que_pagados(escenario_contable):
+    client, ids = escenario_contable
+    with app.app_context():
+        activo = db.session.get(Prestamo, ids["prestamo"])
+        pagado = Prestamo(
+            deudor_id=ids["deudor"], monto=50_000, interes_mensual=10,
+            numero_cuotas=1, dia_pago=15, saldo_capital=0, estado="pagado"
+        )
+        db.session.add(pagado)
+        db.session.commit()
+        activo_id = activo.id
+        pagado_id = pagado.id
+    pagina = client.get(f"/deudor/{ids['deudor']}").get_data(as_text=True)
+    assert pagina.index(f"Préstamo #{activo_id}") < pagina.index(f"Préstamo #{pagado_id}")
