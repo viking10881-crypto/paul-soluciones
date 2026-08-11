@@ -924,6 +924,10 @@ def cuentas():
         cuentas = CuentaContable.query.filter_by(usuario_id=current_user.id).order_by(CuentaContable.nombre).all()
 
     if request.method == "POST":
+        if not current_user.es_admin:
+            flash("Los prestamistas no pueden recargar saldos directamente. El capital debe transferirlo el administrador.", "error")
+            return redirect(url_for("cuentas"))
+
         cuenta_id = int(request.form.get("cuenta_id"))
         monto = float(request.form.get("monto"))
         descripcion = request.form.get("descripcion") or "Inyección de capital"
@@ -933,8 +937,9 @@ def cuentas():
             return redirect(url_for("cuentas"))
 
         cuenta = CuentaContable.query.get_or_404(cuenta_id)
-        if not current_user.es_admin and cuenta.usuario_id != current_user.id:
-            abort(404)
+        if cuenta.usuario_id != current_user.id:
+            flash("No puedes inyectar saldo directamente en una cuenta de un prestamista. Usa Transferir a prestamista.", "error")
+            return redirect(url_for("cuentas"))
         ajustar_saldo_cuenta(
             cuenta,
             monto,
@@ -951,7 +956,12 @@ def cuentas():
     if current_user.es_admin:
         transfer_link = url_for('transferir_prestamista')
 
-    cuentas_inyectables = [cuenta for cuenta in cuentas if not cuenta.slug.startswith("ganancia")]
+    cuentas_inyectables = [
+        cuenta for cuenta in cuentas
+        if current_user.es_admin
+        and cuenta.usuario_id == current_user.id
+        and not cuenta.slug.startswith("ganancia")
+    ]
     return render_template("cuentas.html", cuentas=cuentas, cuentas_inyectables=cuentas_inyectables)
 
 

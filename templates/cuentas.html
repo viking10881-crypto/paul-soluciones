@@ -26,8 +26,10 @@
         {% endfor %}
     </div>
 
+    {% if current_user.es_admin %}
     <div class="form-card">
         <h2>Inyección de capital</h2>
+        <p>Solo permite aumentar las cuentas propias del administrador. Para entregar dinero a un prestamista utiliza la transferencia controlada.</p>
         <form method="POST">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-grid">
@@ -51,6 +53,12 @@
             <button type="submit" class="btn-primary">Registrar inyección</button>
         </form>
     </div>
+    {% else %}
+    <div class="form-card">
+        <h2>Recarga de saldo</h2>
+        <p>Tu saldo es administrado desde la cuenta principal. Solicita al administrador una transferencia de capital.</p>
+    </div>
+    {% endif %}
 
     {% if current_user.es_admin %}
     <div style="margin-top:1rem">
