@@ -19,10 +19,13 @@
 
     <div class="cards-grid">
         {% for cuenta in cuentas %}
-        <div class="metric-card">
-            <span>{{ cuenta.nombre }}{% if current_user.es_admin %} · {{ cuenta.propietario.nombre }}{% endif %}</span>
-            <h2>${{ "{:,.0f}".format(cuenta.saldo) }}</h2>
-        </div>
+        <a href="{{ url_for('movimientos_cuenta', cuenta_id=cuenta.id) }}" class="account-card-link">
+            <div class="metric-card">
+                <span>{{ cuenta.nombre }}{% if current_user.es_admin %} · {{ cuenta.propietario.nombre }}{% endif %}</span>
+                <h2>${{ "{:,.0f}".format(cuenta.saldo) }}</h2>
+                <small>Ver historial →</small>
+            </div>
+        </a>
         {% endfor %}
     </div>
 

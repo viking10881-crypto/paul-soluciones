@@ -2,7 +2,7 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 from app import app, db, obtener_cuentas_contables
-from models import Usuario, CuentaContable
+from models import Usuario, CuentaContable, CuentaMovimiento
 
 
 @pytest.fixture
@@ -70,3 +70,24 @@ def test_transferencia_mixta_descuenta_y_abona_cada_cuenta(escenario):
         from models import CapitalPrestamista
         capital = CapitalPrestamista.query.one()
         assert capital.monto == 100_000
+
+
+def test_historial_muestra_origen_y_protege_cuentas_ajenas(escenario):
+    client, (_, _, banco_admin_id, _, banco_prestamista_id, _) = escenario
+    with app.app_context():
+        cuenta = db.session.get(CuentaContable, banco_prestamista_id)
+        cuenta.saldo = 70_000
+        db.session.add_all([
+            CuentaMovimiento(cuenta_id=cuenta.id, tipo="transferencia", monto=100_000, descripcion="Capital desde administrador"),
+            CuentaMovimiento(cuenta_id=cuenta.id, tipo="desembolso", monto=-30_000, descripcion="Préstamo al cliente"),
+        ])
+        db.session.commit()
+
+    client.post("/login", data={"usuario": "prestamista", "password": "prestamista123"})
+    historial = client.get(f"/cuentas/{banco_prestamista_id}/movimientos")
+    assert historial.status_code == 200
+    cuerpo = historial.get_data(as_text=True)
+    assert "Capital desde administrador" in cuerpo
+    assert "Préstamo al cliente" in cuerpo
+    assert "$70,000" in cuerpo
+    assert client.get(f"/cuentas/{banco_admin_id}/movimientos").status_code == 404

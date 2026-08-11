@@ -977,6 +977,32 @@ def cuentas():
     return render_template("cuentas.html", cuentas=cuentas, cuentas_inyectables=cuentas_inyectables)
 
 
+@app.route("/cuentas/<int:cuenta_id>/movimientos")
+@login_required
+def movimientos_cuenta(cuenta_id):
+    cuenta = CuentaContable.query.get_or_404(cuenta_id)
+    if not current_user.es_admin and cuenta.usuario_id != current_user.id:
+        abort(404)
+
+    movimientos_asc = CuentaMovimiento.query.filter_by(cuenta_id=cuenta.id).order_by(
+        CuentaMovimiento.fecha.asc(),
+        CuentaMovimiento.id.asc(),
+    ).all()
+    saldo_calculado = (cuenta.saldo or 0) - sum(movimiento.monto for movimiento in movimientos_asc)
+    saldos_resultantes = {}
+    for movimiento in movimientos_asc:
+        saldo_calculado += movimiento.monto
+        saldos_resultantes[movimiento.id] = saldo_calculado
+
+    movimientos = list(reversed(movimientos_asc))
+    return render_template(
+        "movimientos_cuenta.html",
+        cuenta=cuenta,
+        movimientos=movimientos,
+        saldos_resultantes=saldos_resultantes,
+    )
+
+
 @app.route("/prestamistas")
 @admin_required
 def prestamistas():

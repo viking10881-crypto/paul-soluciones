@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Movimientos de {{ cuenta.nombre }} | Solucione$ Paul{% endblock %}
+{% block content %}
+<section class="page-section">
+    <div class="page-header">
+        <div>
+            <h1>Historial de {{ cuenta.nombre }}</h1>
+            <p>{{ cuenta.propietario.nombre }} · Trazabilidad completa del saldo</p>
+        </div>
+        <a href="{{ url_for('cuentas') }}" class="btn-small">← Volver a cuentas</a>
+    </div>
+
+    <div class="cards-grid">
+        <div class="metric-card"><span>Saldo actual</span><h2>${{ "{:,.0f}".format(cuenta.saldo) }}</h2></div>
+        <div class="metric-card"><span>Movimientos registrados</span><h2>{{ movimientos|length }}</h2></div>
+    </div>
+
+    <div class="table-card">
+        <table>
+            <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Entrada</th><th>Salida</th><th>Saldo después</th></tr></thead>
+            <tbody>
+            {% for movimiento in movimientos %}
+                <tr>
+                    <td>{{ movimiento.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                    <td>{{ movimiento.tipo|replace('_', ' ')|title }}</td>
+                    <td>{{ movimiento.descripcion or '—' }}</td>
+                    <td>{% if movimiento.monto > 0 %}<strong style="color:#34d399">+${{ "{:,.0f}".format(movimiento.monto) }}</strong>{% else %}—{% endif %}</td>
+                    <td>{% if movimiento.monto < 0 %}<strong style="color:#f87171">-${{ "{:,.0f}".format(-movimiento.monto) }}</strong>{% else %}—{% endif %}</td>
+                    <td>${{ "{:,.0f}".format(saldos_resultantes[movimiento.id]) }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6">Esta cuenta todavía no tiene movimientos registrados.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
