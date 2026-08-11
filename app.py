@@ -489,7 +489,9 @@ def liquidaciones():
     if not current_user.es_admin:
         cuotas = cuotas.filter(Deudor.usuario_id == current_user.id)
     cuotas = cuotas.filter(Cuota.estado == "pagada").order_by(
-        Cuota.liquidado.asc(), Cuota.fecha_vencimiento.asc()
+        Cuota.fecha_liquidacion.desc().nullslast(),
+        Cuota.fecha_vencimiento.desc(),
+        Cuota.numero.desc(),
     ).all()
     capitales_query = CapitalPrestamista.query
     if not current_user.es_admin:
