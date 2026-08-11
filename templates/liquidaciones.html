@@ -57,7 +57,13 @@
                     <td>#{{ cuota.prestamo.id }}</td>
                     <td>{{ cuota.fecha_vencimiento.strftime('%d/%m/%Y') }}</td>
                     <td>${{ "{:,.0f}".format(cuota.capital) }}</td>
-                    <td>{{ cuota.prestamo.capital_administrador.tasa_admin }}% / {{ cuota.prestamo.interes_mensual }}%</td>
+                    <td>
+                        {% if cuota.prestamo.capital_administrador %}
+                            {{ cuota.prestamo.capital_administrador.tasa_admin }}% / {{ cuota.prestamo.interes_mensual }}%
+                        {% else %}
+                            Sin vínculo / {{ cuota.prestamo.interes_mensual }}%
+                        {% endif %}
+                    </td>
                     <td>${{ "{:,.0f}".format(cuota.total) }}</td>
                     <td>
                         {% if cuota.liquidado %}
@@ -71,6 +77,21 @@
                             <div>Admin recibe: ${{ "{:,.0f}".format(cuota.liquidacion.total_admin) }} · Prestamista gana: ${{ "{:,.0f}".format(cuota.liquidacion.ganancia_prestamista) }}</div>
                         {% elif cuota.liquidado %}
                             <div>Liquidación histórica</div>
+                        {% elif not cuota.prestamo.capital_administrador %}
+                            {% set opciones = compatibles.get(cuota.prestamo.id, []) %}
+                            {% if opciones %}
+                            <form method="POST" action="{{ url_for('vincular_capital_prestamo', prestamo_id=cuota.prestamo.id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <select name="capital_prestamista_id" required>
+                                    {% for capital in opciones %}
+                                    <option value="{{ capital.id }}">${{ "{:,.0f}".format(capital.monto) }} · {{ capital.tasa_admin }}% · {{ capital.plazo_meses }} meses</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="submit" class="btn-small">Vincular capital</button>
+                            </form>
+                            {% else %}
+                            <span>Sin capital compatible</span>
+                            {% endif %}
                         {% else %}
                             <a href="{{ url_for('liquidar_cuota', cuota_id=cuota.id) }}" class="btn-small">Liquidar</a>
                         {% endif %}

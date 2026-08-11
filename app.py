@@ -488,10 +488,9 @@ def liquidaciones():
     cuotas = Cuota.query.join(Cuota.prestamo).join(Prestamo.deudor)
     if not current_user.es_admin:
         cuotas = cuotas.filter(Deudor.usuario_id == current_user.id)
-    cuotas = cuotas.filter(
-        Prestamo.capital_prestamista_id.isnot(None),
-        Cuota.estado == "pagada",
-    ).order_by(Cuota.liquidado.asc(), Cuota.fecha_vencimiento.asc()).all()
+    cuotas = cuotas.filter(Cuota.estado == "pagada").order_by(
+        Cuota.liquidado.asc(), Cuota.fecha_vencimiento.asc()
+    ).all()
     capitales_query = CapitalPrestamista.query
     if not current_user.es_admin:
         capitales_query = capitales_query.filter_by(prestamista_id=current_user.id)
@@ -507,7 +506,54 @@ def liquidaciones():
                 capital.prestamo_cliente.interes_mensual,
             )
         resumenes.append({"capital": capital, "proyeccion": proyeccion})
-    return render_template("liquidaciones.html", cuotas=cuotas, resumenes=resumenes)
+    compatibles = {}
+    for cuota in cuotas:
+        prestamo = cuota.prestamo
+        if prestamo.capital_prestamista_id is None:
+            compatibles[prestamo.id] = [
+                capital for capital in capitales
+                if capital.prestamista_id == prestamo.deudor.usuario_id
+                and capital.estado == "disponible"
+                and abs(capital.monto - prestamo.monto) <= 0.01
+                and (not capital.plazo_meses or capital.plazo_meses == prestamo.numero_cuotas)
+                and capital.tasa_admin <= prestamo.interes_mensual
+            ]
+    return render_template(
+        "liquidaciones.html",
+        cuotas=cuotas,
+        resumenes=resumenes,
+        compatibles=compatibles,
+    )
+
+
+@app.route("/liquidacion/prestamo/<int:prestamo_id>/vincular", methods=["POST"])
+@login_required
+def vincular_capital_prestamo(prestamo_id):
+    prestamo = prestamo_visible_o_404(prestamo_id)
+    if prestamo.capital_prestamista_id:
+        flash("El préstamo ya tiene un capital del administrador vinculado.", "error")
+        return redirect(url_for("liquidaciones"))
+
+    capital_id = request.form.get("capital_prestamista_id", type=int)
+    capital = CapitalPrestamista.query.filter_by(
+        id=capital_id,
+        prestamista_id=prestamo.deudor.usuario_id,
+        estado="disponible",
+    ).first_or_404()
+    if abs(capital.monto - prestamo.monto) > 0.01 or (
+        capital.plazo_meses and capital.plazo_meses != prestamo.numero_cuotas
+    ):
+        flash("El monto y el plazo del capital no coinciden con el préstamo.", "error")
+        return redirect(url_for("liquidaciones"))
+    if capital.tasa_admin > prestamo.interes_mensual:
+        flash("La tasa administrativa no puede superar la tasa del cliente.", "error")
+        return redirect(url_for("liquidaciones"))
+
+    prestamo.capital_prestamista_id = capital.id
+    capital.estado = "colocado"
+    db.session.commit()
+    flash("Capital vinculado. Las cuotas pagadas ya están disponibles para liquidar.", "success")
+    return redirect(url_for("liquidaciones"))
 
 
 @app.route('/admin/transferir', methods=['GET', 'POST'])
@@ -1102,12 +1148,22 @@ def nuevo_prestamo(deudor_id):
         monto_caja = float(request.form.get("monto_caja_menor") or 0)
         monto_banco = float(request.form.get("monto_banco") or 0)
         cuenta_slug = request.form.get("cuenta_desembolso") or "caja_menor"
+        origen_capital = request.form.get("origen_capital")
         capital_admin_id = request.form.get("capital_prestamista_id", type=int)
         capital_admin = None
 
         if monto <= 0:
             flash("El monto del préstamo debe ser mayor a cero.", "error")
             return mostrar_formulario()
+
+        if origen_capital not in ("propio", "administrador"):
+            flash("Selecciona si el préstamo usa capital propio o del administrador.", "error")
+            return mostrar_formulario()
+        if origen_capital == "administrador" and not capital_admin_id:
+            flash("Selecciona el capital entregado por el administrador.", "error")
+            return mostrar_formulario()
+        if origen_capital == "propio":
+            capital_admin_id = None
 
         if numero_cuotas <= 0 or interes_mensual < 0:
             flash("El número de cuotas debe ser mayor a cero y la tasa no puede ser negativa.", "error")

@@ -57,8 +57,16 @@
                 {% if not prestamo %}
                 <div class="form-group">
                     <label>Origen del capital</label>
+                    <select name="origen_capital" id="origen_capital" required>
+                        <option value="" selected disabled>Selecciona el origen</option>
+                        <option value="propio">Capital propio del prestamista</option>
+                        <option value="administrador">Capital entregado por el administrador</option>
+                    </select>
+                </div>
+                <div class="form-group" id="capital_admin_group" style="display:none">
+                    <label>Capital del administrador</label>
                     <select name="capital_prestamista_id" id="capital_prestamista_id">
-                        <option value="">Capital propio del prestamista</option>
+                        <option value="">Selecciona un capital disponible</option>
                         {% for capital in capitales_admin %}
                         <option value="{{ capital.id }}"
                                 data-monto="{{ capital.monto }}"
@@ -165,6 +173,8 @@ const montoInput    = document.getElementById("monto");
 const cuotasInput   = document.getElementById("numero_cuotas");
 const interesInput  = document.getElementById("interes_mensual");
 const capitalAdminSelect = document.getElementById("capital_prestamista_id");
+const origenCapitalSelect = document.getElementById("origen_capital");
+const capitalAdminGroup = document.getElementById("capital_admin_group");
 
 const interesPreview = document.getElementById("interes_preview");
 const capitalPreview = document.getElementById("capital_preview");
@@ -254,6 +264,16 @@ if (capitalAdminSelect) {
         if (opcion.dataset.plazo) cuotasInput.value = opcion.dataset.plazo;
         calcularPreview();
         actualizarOrigen();
+    });
+}
+
+if (origenCapitalSelect) {
+    origenCapitalSelect.addEventListener("change", () => {
+        const usaAdmin = origenCapitalSelect.value === "administrador";
+        capitalAdminGroup.style.display = usaAdmin ? "block" : "none";
+        capitalAdminSelect.required = usaAdmin;
+        if (!usaAdmin) capitalAdminSelect.value = "";
+        calcularPreview();
     });
 }
 
