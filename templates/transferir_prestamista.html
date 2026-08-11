@@ -28,9 +28,21 @@
                 </select>
             </div>
 
-            <div class="form-group">
-                <label>Monto</label>
-                <input type="number" name="monto" step="0.01" min="0.01" required>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Desde Banco</label>
+                    <input type="number" name="monto_banco" id="monto_banco" step="0.01" min="0" value="0">
+                    <small>Disponible: ${{ "{:,.0f}".format(banco_admin.saldo) }}</small>
+                </div>
+                <div class="form-group">
+                    <label>Desde Caja menor</label>
+                    <input type="number" name="monto_caja_menor" id="monto_caja_menor" step="0.01" min="0" value="0">
+                    <small>Disponible: ${{ "{:,.0f}".format(caja_admin.saldo) }}</small>
+                </div>
+                <div class="form-group">
+                    <label>Total a prestar</label>
+                    <input type="text" id="total_transferencia" value="$0" readonly>
+                </div>
             </div>
 
             <div class="form-group">
@@ -50,8 +62,21 @@
     </div>
 
     <div class="cards-grid">
-        <div class="metric-card"><span>Banco admin</span><h2>${{ "{:,.0f}".format(cuenta_admin.saldo) }}</h2></div>
+        <div class="metric-card"><span>Banco administrador</span><h2>${{ "{:,.0f}".format(banco_admin.saldo) }}</h2></div>
+        <div class="metric-card"><span>Caja menor administrador</span><h2>${{ "{:,.0f}".format(caja_admin.saldo) }}</h2></div>
     </div>
 
 </section>
+<script>
+const montoBanco = document.getElementById('monto_banco');
+const montoCaja = document.getElementById('monto_caja_menor');
+const totalTransferencia = document.getElementById('total_transferencia');
+function actualizarTotal() {
+    const total = (parseFloat(montoBanco.value) || 0) + (parseFloat(montoCaja.value) || 0);
+    totalTransferencia.value = new Intl.NumberFormat('es-CO', {style: 'currency', currency: 'COP', maximumFractionDigits: 0}).format(total);
+}
+montoBanco.addEventListener('input', actualizarTotal);
+montoCaja.addEventListener('input', actualizarTotal);
+actualizarTotal();
+</script>
 {% endblock %}

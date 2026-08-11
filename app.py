@@ -564,31 +564,38 @@ def transferir_prestamista():
     prestamistas = Usuario.query.filter_by(rol='prestamista', activo=True).order_by(Usuario.nombre).all()
     admin_usuario = Usuario.query.filter_by(rol='admin').first()
     obtener_cuentas_contables(admin_usuario)
-    cuenta_admin = obtener_cuenta('banco', admin_usuario)
+    banco_admin = obtener_cuenta('banco', admin_usuario)
+    caja_admin = obtener_cuenta('caja_menor', admin_usuario)
 
     if request.method == 'POST':
         prestamista_id = int(request.form.get('prestamista_id'))
-        monto = float(request.form.get('monto') or 0)
+        monto_banco = float(request.form.get('monto_banco') or request.form.get('monto') or 0)
+        monto_caja = float(request.form.get('monto_caja_menor') or 0)
+        monto = monto_banco + monto_caja
         tasa_admin = float(request.form.get('tasa_admin') or 0)
         plazo = int(request.form.get('plazo') or 0)
 
-        if monto <= 0 or tasa_admin < 0 or plazo <= 0:
-            flash('El monto y el plazo deben ser mayores a cero; la tasa no puede ser negativa.', 'error')
+        if monto <= 0 or monto_banco < 0 or monto_caja < 0 or tasa_admin < 0 or plazo <= 0:
+            flash('Los montos y el plazo deben ser válidos; la tasa no puede ser negativa.', 'error')
             return redirect(url_for('transferir_prestamista'))
 
         prestamista = Usuario.query.filter_by(id=prestamista_id, rol="prestamista", activo=True).first_or_404()
-        cuenta_prestamista_banco = obtener_cuenta('banco', prestamista)
+        banco_prestamista = obtener_cuenta('banco', prestamista)
+        caja_prestamista = obtener_cuenta('caja_menor', prestamista)
 
-        if not cuenta_admin or (cuenta_admin.saldo or 0) < monto:
-            flash('Saldo insuficiente en la cuenta del administrador.', 'error')
+        if (banco_admin.saldo or 0) < monto_banco:
+            flash(f'Saldo insuficiente en Banco del administrador: disponible ${banco_admin.saldo:,.0f}.', 'error')
+            return redirect(url_for('transferir_prestamista'))
+        if (caja_admin.saldo or 0) < monto_caja:
+            flash(f'Saldo insuficiente en Caja menor del administrador: disponible ${caja_admin.saldo:,.0f}.', 'error')
             return redirect(url_for('transferir_prestamista'))
 
-        if not cuenta_prestamista_banco:
-            cuenta_prestamista_banco = obtener_cuenta('banco', prestamista)
-
-        # mover fondos
-        ajustar_saldo_cuenta(cuenta_admin, -monto, f'Transferencia a {prestamista.nombre}', 'transferencia')
-        ajustar_saldo_cuenta(cuenta_prestamista_banco, monto, f'Transferencia desde admin', 'transferencia')
+        if monto_banco > 0:
+            ajustar_saldo_cuenta(banco_admin, -monto_banco, f'Transferencia a {prestamista.nombre}', 'transferencia')
+            ajustar_saldo_cuenta(banco_prestamista, monto_banco, 'Transferencia desde Banco del administrador', 'transferencia')
+        if monto_caja > 0:
+            ajustar_saldo_cuenta(caja_admin, -monto_caja, f'Transferencia a {prestamista.nombre}', 'transferencia')
+            ajustar_saldo_cuenta(caja_prestamista, monto_caja, 'Transferencia desde Caja menor del administrador', 'transferencia')
 
         capital = CapitalPrestamista(
             prestamista_id=prestamista.id,
@@ -604,7 +611,12 @@ def transferir_prestamista():
         flash('Transferencia registrada correctamente.', 'success')
         return redirect(url_for('cuentas'))
 
-    return render_template('transferir_prestamista.html', prestamistas=prestamistas, cuenta_admin=cuenta_admin)
+    return render_template(
+        'transferir_prestamista.html',
+        prestamistas=prestamistas,
+        banco_admin=banco_admin,
+        caja_admin=caja_admin,
+    )
 
 
 @app.route("/liquidacion/cuota/<int:cuota_id>", methods=["GET", "POST"])
