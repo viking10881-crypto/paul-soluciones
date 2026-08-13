@@ -29,6 +29,35 @@
         {% endfor %}
     </div>
 
+    <div class="form-card">
+        <h2>Mover dinero entre mis cuentas</h2>
+        <p>Transfiere saldo entre Banco y Caja menor. El total de tu dinero no cambia y ambos movimientos quedan en el historial.</p>
+        <form method="POST" action="{{ url_for('transferencia_interna') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Desde</label>
+                    <select name="cuenta_origen" required>
+                        <option value="caja_menor">Caja menor — ${{ "{:,.0f}".format(cuentas_propias.caja_menor.saldo) }}</option>
+                        <option value="banco">Banco — ${{ "{:,.0f}".format(cuentas_propias.banco.saldo) }}</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Hacia</label>
+                    <select name="cuenta_destino" required>
+                        <option value="banco">Banco</option>
+                        <option value="caja_menor">Caja menor</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Monto</label>
+                    <input type="number" name="monto" step="0.01" min="0.01" required>
+                </div>
+            </div>
+            <button type="submit" class="btn-primary" onclick="return confirm('¿Confirmar el movimiento entre tus cuentas?')">Transferir entre cuentas</button>
+        </form>
+    </div>
+
     {% if current_user.es_admin %}
     <div class="form-card">
         <h2>Inyección de capital</h2>

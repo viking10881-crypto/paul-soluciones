@@ -2,7 +2,7 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 from app import app, db, obtener_cuentas_contables
-from models import Usuario, CuentaContable, CuentaMovimiento
+from models import Usuario, CuentaContable, CuentaMovimiento, CapitalPrestamista
 
 
 @pytest.fixture
@@ -91,3 +91,84 @@ def test_historial_muestra_origen_y_protege_cuentas_ajenas(escenario):
     assert "Préstamo al cliente" in cuerpo
     assert "$70,000" in cuerpo
     assert client.get(f"/cuentas/{banco_admin_id}/movimientos").status_code == 404
+
+
+def test_transferencia_interna_mueve_saldo_sin_crear_capital(escenario):
+    client, (_, _, banco_admin_id, caja_admin_id, _, _) = escenario
+    client.post("/login", data={"usuario": "admin", "password": "admin123456"})
+    assert client.get("/cuentas").status_code == 200
+    respuesta = client.post("/cuentas/transferencia-interna", data={
+        "cuenta_origen": "caja_menor", "cuenta_destino": "banco", "monto": 20_000,
+    })
+    assert respuesta.status_code == 302
+    with app.app_context():
+        assert db.session.get(CuentaContable, caja_admin_id).saldo == 30_000
+        assert db.session.get(CuentaContable, banco_admin_id).saldo == 120_000
+        assert CapitalPrestamista.query.count() == 0
+        movimientos = CuentaMovimiento.query.filter_by(tipo="transferencia_interna").all()
+        assert sorted(m.monto for m in movimientos) == [-20_000, 20_000]
+
+
+def test_transferencia_interna_rechaza_saldo_insuficiente(escenario):
+    client, (_, _, banco_admin_id, caja_admin_id, _, _) = escenario
+    client.post("/login", data={"usuario": "admin", "password": "admin123456"})
+    client.post("/cuentas/transferencia-interna", data={
+        "cuenta_origen": "caja_menor", "cuenta_destino": "banco", "monto": 60_000,
+    })
+    with app.app_context():
+        assert db.session.get(CuentaContable, caja_admin_id).saldo == 50_000
+        assert db.session.get(CuentaContable, banco_admin_id).saldo == 100_000
+
+
+def test_anular_capital_reintegra_cuentas_y_conserva_historial(escenario):
+    client, (_, prestamista_id, banco_admin_id, caja_admin_id, banco_prestamista_id, caja_prestamista_id) = escenario
+    client.post("/login", data={"usuario": "admin", "password": "admin123456"})
+    client.post("/admin/transferir", data={
+        "prestamista_id": prestamista_id,
+        "monto_banco": 70_000,
+        "monto_caja_menor": 30_000,
+        "tasa_admin": 6,
+        "plazo": 5,
+    })
+    with app.app_context():
+        capital_id = CapitalPrestamista.query.one().id
+
+    respuesta = client.post(f"/admin/capital/{capital_id}/anular", data={"motivo": "Monto equivocado"})
+    assert respuesta.status_code == 302
+    with app.app_context():
+        capital = db.session.get(CapitalPrestamista, capital_id)
+        assert capital.estado == "anulado"
+        assert capital.saldo_pendiente == 0
+        assert capital.motivo_anulacion == "Monto equivocado"
+        assert db.session.get(CuentaContable, banco_admin_id).saldo == 100_000
+        assert db.session.get(CuentaContable, caja_admin_id).saldo == 50_000
+        assert db.session.get(CuentaContable, banco_prestamista_id).saldo == 0
+        assert db.session.get(CuentaContable, caja_prestamista_id).saldo == 0
+        assert CuentaMovimiento.query.filter_by(
+            capital_prestamista_id=capital_id, tipo="anulacion_capital"
+        ).count() == 4
+
+
+def test_anulacion_funciona_despues_de_mover_caja_a_banco(escenario):
+    client, (_, prestamista_id, banco_admin_id, caja_admin_id, banco_prestamista_id, caja_prestamista_id) = escenario
+    client.post("/login", data={"usuario": "admin", "password": "admin123456"})
+    client.post("/admin/transferir", data={
+        "prestamista_id": prestamista_id, "monto_banco": 0, "monto_caja_menor": 30_000,
+        "tasa_admin": 6, "plazo": 5,
+    })
+    with app.app_context():
+        capital_id = CapitalPrestamista.query.one().id
+    client.post("/logout")
+    client.post("/login", data={"usuario": "prestamista", "password": "prestamista123"})
+    client.post("/cuentas/transferencia-interna", data={
+        "cuenta_origen": "caja_menor", "cuenta_destino": "banco", "monto": 30_000,
+    })
+    client.post("/logout")
+    client.post("/login", data={"usuario": "admin", "password": "admin123456"})
+    client.post(f"/admin/capital/{capital_id}/anular", data={"motivo": "Corrección"})
+    with app.app_context():
+        assert db.session.get(CapitalPrestamista, capital_id).estado == "anulado"
+        assert db.session.get(CuentaContable, caja_admin_id).saldo == 50_000
+        assert db.session.get(CuentaContable, banco_admin_id).saldo == 100_000
+        assert db.session.get(CuentaContable, banco_prestamista_id).saldo == 0
+        assert db.session.get(CuentaContable, caja_prestamista_id).saldo == 0

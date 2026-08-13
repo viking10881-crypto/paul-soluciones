@@ -263,6 +263,8 @@ def asegurar_esquema():
                 conn.execute(text("ALTER TABLE cuenta_movimientos ADD COLUMN prestamo_id INTEGER"))
             if "pago_id" not in movimientos_cols:
                 conn.execute(text("ALTER TABLE cuenta_movimientos ADD COLUMN pago_id INTEGER"))
+            if "capital_prestamista_id" not in movimientos_cols:
+                conn.execute(text("ALTER TABLE cuenta_movimientos ADD COLUMN capital_prestamista_id INTEGER"))
 
             result = conn.execute(text("PRAGMA table_info(cuotas)"))
             cuotas_cols = [row[1] for row in result.fetchall()]
@@ -283,6 +285,16 @@ def asegurar_esquema():
                 conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN interes_liquidado FLOAT NOT NULL DEFAULT 0.0"))
             if "estado" not in capital_cols:
                 conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN estado VARCHAR(20) NOT NULL DEFAULT 'disponible'"))
+            if "monto_banco" not in capital_cols:
+                conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN monto_banco NUMERIC(18,2) NOT NULL DEFAULT 0"))
+            if "monto_caja_menor" not in capital_cols:
+                conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN monto_caja_menor NUMERIC(18,2) NOT NULL DEFAULT 0"))
+            if "anulado_en" not in capital_cols:
+                conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN anulado_en DATETIME"))
+            if "anulado_por_id" not in capital_cols:
+                conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN anulado_por_id INTEGER"))
+            if "motivo_anulacion" not in capital_cols:
+                conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN motivo_anulacion VARCHAR(250)"))
 
             conn.execute(text("PRAGMA foreign_keys = ON"))
             conn.commit()
@@ -328,6 +340,7 @@ def asegurar_esquema():
                 conn.execute(text(
                     "ALTER TABLE cuenta_movimientos ADD COLUMN IF NOT EXISTS pago_id INTEGER"
                 ))
+            conn.execute(text("ALTER TABLE cuenta_movimientos ADD COLUMN IF NOT EXISTS capital_prestamista_id INTEGER"))
 
             result = conn.execute(text(
                 "SELECT column_name FROM information_schema.columns "
@@ -357,6 +370,11 @@ def asegurar_esquema():
             conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS capital_liquidado FLOAT NOT NULL DEFAULT 0.0"))
             conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS interes_liquidado FLOAT NOT NULL DEFAULT 0.0"))
             conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'disponible'"))
+            conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS monto_banco NUMERIC(18,2) NOT NULL DEFAULT 0"))
+            conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS monto_caja_menor NUMERIC(18,2) NOT NULL DEFAULT 0"))
+            conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS anulado_en TIMESTAMP"))
+            conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS anulado_por_id INTEGER"))
+            conn.execute(text("ALTER TABLE capital_prestamista ADD COLUMN IF NOT EXISTS motivo_anulacion VARCHAR(250)"))
 
             # El dinero se almacena con precisión decimal; USING redondea cualquier
             # residuo binario legado sin alterar el valor visible a dos decimales.
@@ -366,7 +384,7 @@ def asegurar_esquema():
                 "prestamos": ("monto", "saldo_capital"),
                 "cuotas": ("capital", "interes", "total", "pagado_capital", "pagado_interes", "ganancia_prestamista"),
                 "pagos": ("monto", "capital_pagado", "interes_pagado"),
-                "capital_prestamista": ("monto", "saldo_pendiente", "capital_liquidado", "interes_liquidado"),
+                "capital_prestamista": ("monto", "monto_banco", "monto_caja_menor", "saldo_pendiente", "capital_liquidado", "interes_liquidado"),
                 "liquidaciones_capital": ("capital_inicial", "capital_admin", "interes_admin", "ganancia_prestamista", "pago_cliente", "total_admin"),
             }
             for tabla, columnas in columnas_dinero.items():
@@ -487,7 +505,7 @@ def obtener_cuenta(slug, usuario=None):
     return cuenta
 
 
-def ajustar_saldo_cuenta(cuenta, monto, descripcion, tipo, prestamo_id=None, pago_id=None):
+def ajustar_saldo_cuenta(cuenta, monto, descripcion, tipo, prestamo_id=None, pago_id=None, capital_prestamista_id=None):
     monto = como_float(monto)
     cuenta.saldo = como_float(dinero(cuenta.saldo or 0) + dinero(monto))
 
@@ -495,6 +513,7 @@ def ajustar_saldo_cuenta(cuenta, monto, descripcion, tipo, prestamo_id=None, pag
         cuenta_id=cuenta.id,
         prestamo_id=prestamo_id,
         pago_id=pago_id,
+        capital_prestamista_id=capital_prestamista_id,
         tipo=tipo,
         monto=monto,
         descripcion=descripcion,
@@ -652,22 +671,25 @@ def transferir_prestamista():
             flash(f'Saldo insuficiente en Caja menor del administrador: disponible ${caja_admin.saldo:,.0f}.', 'error')
             return redirect(url_for('transferir_prestamista'))
 
-        if monto_banco > 0:
-            ajustar_saldo_cuenta(banco_admin, -monto_banco, f'Transferencia a {prestamista.nombre}', 'transferencia')
-            ajustar_saldo_cuenta(banco_prestamista, monto_banco, 'Transferencia desde Banco del administrador', 'transferencia')
-        if monto_caja > 0:
-            ajustar_saldo_cuenta(caja_admin, -monto_caja, f'Transferencia a {prestamista.nombre}', 'transferencia')
-            ajustar_saldo_cuenta(caja_prestamista, monto_caja, 'Transferencia desde Caja menor del administrador', 'transferencia')
-
         capital = CapitalPrestamista(
             prestamista_id=prestamista.id,
             monto=monto,
+            monto_banco=monto_banco,
+            monto_caja_menor=monto_caja,
             tasa_admin=tasa_admin,
             plazo_meses=plazo,
             saldo_pendiente=monto,
             estado="disponible",
         )
         db.session.add(capital)
+        db.session.flush()
+
+        if monto_banco > 0:
+            ajustar_saldo_cuenta(banco_admin, -monto_banco, f'Transferencia de capital #{capital.id} a {prestamista.nombre}', 'transferencia', capital_prestamista_id=capital.id)
+            ajustar_saldo_cuenta(banco_prestamista, monto_banco, f'Capital #{capital.id} desde Banco del administrador', 'transferencia', capital_prestamista_id=capital.id)
+        if monto_caja > 0:
+            ajustar_saldo_cuenta(caja_admin, -monto_caja, f'Transferencia de capital #{capital.id} a {prestamista.nombre}', 'transferencia', capital_prestamista_id=capital.id)
+            ajustar_saldo_cuenta(caja_prestamista, monto_caja, f'Capital #{capital.id} desde Caja menor del administrador', 'transferencia', capital_prestamista_id=capital.id)
 
         db.session.commit()
         flash('Transferencia registrada correctamente.', 'success')
@@ -679,6 +701,61 @@ def transferir_prestamista():
         banco_admin=banco_admin,
         caja_admin=caja_admin,
     )
+
+
+@app.route("/admin/capital/<int:capital_id>/anular", methods=["POST"])
+@admin_required
+def anular_capital_prestamista(capital_id):
+    capital = CapitalPrestamista.query.filter_by(id=capital_id).with_for_update().first_or_404()
+    motivo = (request.form.get("motivo") or "Error al registrar la transferencia").strip()[:250]
+    if capital.estado != "disponible" or capital.prestamo_cliente or capital.liquidaciones:
+        flash("Este capital ya fue utilizado o liquidado y no puede anularse.", "error")
+        return redirect(url_for("liquidaciones"))
+
+    monto_banco = dinero(capital.monto_banco or 0)
+    monto_caja = dinero(capital.monto_caja_menor or 0)
+    if monto_banco + monto_caja != dinero(capital.monto):
+        flash("Este capital antiguo no tiene trazabilidad completa de origen y no puede anularse automáticamente.", "error")
+        return redirect(url_for("liquidaciones"))
+
+    admin = Usuario.query.filter_by(rol="admin").first_or_404()
+    cuentas = [
+        obtener_cuenta("banco", admin), obtener_cuenta("caja_menor", admin),
+        obtener_cuenta("banco", capital.prestamista), obtener_cuenta("caja_menor", capital.prestamista),
+    ]
+    bloqueadas = {
+        c.id: c for c in CuentaContable.query.filter(
+            CuentaContable.id.in_(sorted(c.id for c in cuentas))
+        ).order_by(CuentaContable.id).with_for_update().all()
+    }
+    banco_admin, caja_admin, banco_prestamista, caja_prestamista = [bloqueadas[c.id] for c in cuentas]
+    total_anular = monto_banco + monto_caja
+    saldo_prestamista = dinero(banco_prestamista.saldo or 0) + dinero(caja_prestamista.saldo or 0)
+    if saldo_prestamista < total_anular:
+        db.session.rollback()
+        flash("El prestamista ya no conserva todo el capital; no se puede anular automáticamente.", "error")
+        return redirect(url_for("liquidaciones"))
+
+    descripcion = f"Anulación de capital #{capital.id}: {motivo}"
+    restante = total_anular
+    retiro_banco = min(dinero(banco_prestamista.saldo or 0), restante)
+    if retiro_banco > 0:
+        ajustar_saldo_cuenta(banco_prestamista, -retiro_banco, descripcion, "anulacion_capital", capital_prestamista_id=capital.id)
+        restante -= retiro_banco
+    if restante > 0:
+        ajustar_saldo_cuenta(caja_prestamista, -restante, descripcion, "anulacion_capital", capital_prestamista_id=capital.id)
+    if monto_banco > 0:
+        ajustar_saldo_cuenta(banco_admin, monto_banco, descripcion, "anulacion_capital", capital_prestamista_id=capital.id)
+    if monto_caja > 0:
+        ajustar_saldo_cuenta(caja_admin, monto_caja, descripcion, "anulacion_capital", capital_prestamista_id=capital.id)
+    capital.estado = "anulado"
+    capital.saldo_pendiente = 0
+    capital.anulado_en = datetime.utcnow()
+    capital.anulado_por_id = current_user.id
+    capital.motivo_anulacion = motivo
+    db.session.commit()
+    flash(f"Capital #{capital.id} anulado. El dinero regresó a las cuentas del administrador.", "success")
+    return redirect(url_for("liquidaciones"))
 
 
 @app.route("/liquidacion/cuota/<int:cuota_id>", methods=["GET", "POST"])
@@ -1036,7 +1113,16 @@ def cuentas():
         and cuenta.usuario_id == current_user.id
         and not cuenta.slug.startswith("ganancia")
     ]
-    return render_template("cuentas.html", cuentas=cuentas, cuentas_inyectables=cuentas_inyectables)
+    cuentas_propias = {
+        cuenta.slug.split(f"_{current_user.id}")[0]: cuenta
+        for cuenta in CuentaContable.query.filter_by(usuario_id=current_user.id).all()
+    }
+    return render_template(
+        "cuentas.html",
+        cuentas=cuentas,
+        cuentas_inyectables=cuentas_inyectables,
+        cuentas_propias=cuentas_propias,
+    )
 
 
 @app.route("/cuentas/<int:cuenta_id>/movimientos")
@@ -1063,6 +1149,47 @@ def movimientos_cuenta(cuenta_id):
         movimientos=movimientos,
         saldos_resultantes=saldos_resultantes,
     )
+
+
+@app.route("/cuentas/transferencia-interna", methods=["POST"])
+@login_required
+def transferencia_interna():
+    origen_slug = request.form.get("cuenta_origen")
+    destino_slug = request.form.get("cuenta_destino")
+    if {origen_slug, destino_slug} != {"banco", "caja_menor"}:
+        flash("Selecciona Banco y Caja menor como cuentas diferentes.", "error")
+        return redirect(url_for("cuentas"))
+    try:
+        monto = dinero(request.form.get("monto"))
+    except ValueError as error:
+        flash(str(error), "error")
+        return redirect(url_for("cuentas"))
+    if monto <= 0:
+        flash("El monto debe ser mayor a cero.", "error")
+        return redirect(url_for("cuentas"))
+
+    origen = obtener_cuenta(origen_slug, current_user)
+    destino = obtener_cuenta(destino_slug, current_user)
+    bloqueadas = {
+        cuenta.id: cuenta for cuenta in CuentaContable.query.filter(
+            CuentaContable.id.in_(sorted([origen.id, destino.id])),
+            CuentaContable.usuario_id == current_user.id,
+        ).order_by(CuentaContable.id).with_for_update().all()
+    }
+    origen = bloqueadas.get(origen.id)
+    destino = bloqueadas.get(destino.id)
+    if not origen or not destino or dinero(origen.saldo or 0) < monto:
+        disponible = origen.saldo if origen else 0
+        db.session.rollback()
+        flash(f"Saldo insuficiente en la cuenta de origen: disponible ${disponible:,.2f}.", "error")
+        return redirect(url_for("cuentas"))
+
+    descripcion = f"Transferencia interna {origen.nombre} → {destino.nombre}"
+    ajustar_saldo_cuenta(origen, -monto, descripcion, "transferencia_interna")
+    ajustar_saldo_cuenta(destino, monto, descripcion, "transferencia_interna")
+    db.session.commit()
+    flash(f"Se transfirieron ${float(monto):,.2f} de {origen.nombre} a {destino.nombre}.", "success")
+    return redirect(url_for("cuentas"))
 
 
 @app.route("/prestamistas")

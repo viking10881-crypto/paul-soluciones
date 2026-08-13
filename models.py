@@ -63,6 +63,7 @@ class CuentaMovimiento(db.Model):
     cuenta_id = db.Column(db.Integer, db.ForeignKey("cuentas_contables.id"), nullable=False)
     prestamo_id = db.Column(db.Integer, db.ForeignKey("prestamos.id"), nullable=True)
     pago_id = db.Column(db.Integer, db.ForeignKey("pagos.id"), nullable=True)
+    capital_prestamista_id = db.Column(db.Integer, db.ForeignKey("capital_prestamista.id"), nullable=True)
     tipo = db.Column(db.String(50), nullable=False)
     monto = db.Column(Dinero(), nullable=False)
     descripcion = db.Column(db.String(200))
@@ -211,6 +212,8 @@ class CapitalPrestamista(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     prestamista_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=False)
     monto = db.Column(Dinero(), nullable=False)
+    monto_banco = db.Column(Dinero(), nullable=False, default=0.0)
+    monto_caja_menor = db.Column(Dinero(), nullable=False, default=0.0)
     tasa_admin = db.Column(db.Float, nullable=False)
     plazo_meses = db.Column(db.Integer, nullable=True)
     saldo_pendiente = db.Column(Dinero(), nullable=False)
@@ -218,8 +221,12 @@ class CapitalPrestamista(db.Model):
     interes_liquidado = db.Column(Dinero(), nullable=False, default=0.0)
     estado = db.Column(db.String(20), nullable=False, default="disponible")
     creado_en = db.Column(db.DateTime, default=datetime.utcnow)
+    anulado_en = db.Column(db.DateTime, nullable=True)
+    anulado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"), nullable=True)
+    motivo_anulacion = db.Column(db.String(250), nullable=True)
 
-    prestamista = db.relationship("Usuario", backref="capital_prestamos")
+    prestamista = db.relationship("Usuario", backref="capital_prestamos", foreign_keys=[prestamista_id])
+    anulado_por = db.relationship("Usuario", foreign_keys=[anulado_por_id])
     prestamo_cliente = db.relationship("Prestamo", backref="capital_administrador", uselist=False)
 
 
