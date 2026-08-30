@@ -487,19 +487,25 @@ def obtener_cuentas_contables(usuario=None):
 
 def obtener_cuenta(slug, usuario=None):
     usuario = usuario or current_user
-    if slug not in {"banco", "caja_menor", "ganancia"}:
-        return None
-    cuenta = CuentaContable.query.filter_by(usuario_id=usuario.id, slug=slug).first()
-    if cuenta:
-        return cuenta
+    cuentas_base = {"banco", "caja_menor", "ganancia"}
     sufijo = "" if usuario.es_admin else f"_{usuario.id}"
-    cuenta = CuentaContable.query.filter_by(usuario_id=usuario.id, slug=f"{slug}{sufijo}").first()
+
+    # Los formularios envian el slug real de la cuenta, que para los
+    # prestamistas incluye su sufijo (por ejemplo, banco_4).
+    slug_base = slug[:-len(sufijo)] if sufijo and slug.endswith(sufijo) else slug
+    if slug_base not in cuentas_base:
+        return None
+
+    slug_cuenta = f"{slug_base}{sufijo}"
+    cuenta = CuentaContable.query.filter_by(
+        usuario_id=usuario.id, slug=slug_cuenta
+    ).first()
     if cuenta:
         return cuenta
 
     # Si no existe la cuenta, crearla automáticamente para evitar errores de transferencia.
-    nombre = "Banco" if slug == "banco" else "Caja menor" if slug == "caja_menor" else slug.capitalize()
-    cuenta = CuentaContable(nombre=nombre, slug=f"{slug}{sufijo}", saldo=0.0, usuario_id=usuario.id)
+    nombre = "Banco" if slug_base == "banco" else "Caja menor" if slug_base == "caja_menor" else slug_base.capitalize()
+    cuenta = CuentaContable(nombre=nombre, slug=slug_cuenta, saldo=0.0, usuario_id=usuario.id)
     db.session.add(cuenta)
     db.session.commit()
     return cuenta
