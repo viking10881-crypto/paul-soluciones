@@ -542,6 +542,36 @@ def calcular_liquidacion_cuota(cuota):
     )
 
 
+def _recalcular_estado_capital(capital):
+    """Deriva el estado a partir de saldo_pendiente (asignación) y capital_liquidado."""
+    if capital.estado == "anulado":
+        return
+    monto = dinero(capital.monto or 0)
+    liquidado = dinero(capital.capital_liquidado or 0)
+    saldo = dinero(capital.saldo_pendiente or 0)
+    if liquidado >= monto - CENTAVO:
+        capital.estado = "liquidado"
+    elif saldo <= CENTAVO:
+        capital.estado = "colocado"
+    else:
+        capital.estado = "disponible"
+
+
+def asignar_capital_a_prestamo(capital, prestamo):
+    capital.saldo_pendiente = como_float(dinero(capital.saldo_pendiente or 0) - dinero(prestamo.monto))
+    _recalcular_estado_capital(capital)
+
+
+def liberar_capital_de_prestamo(capital, prestamo):
+    # Solo se llama desde rutas que ya garantizan que el préstamo no tiene
+    # cuotas liquidadas (eliminar_deudor / eliminar_prestamo), así que
+    # siempre es seguro devolver el monto completo al saldo sin asignar.
+    capital.saldo_pendiente = como_float(
+        min(dinero(capital.saldo_pendiente or 0) + dinero(prestamo.monto), dinero(capital.monto or 0))
+    )
+    _recalcular_estado_capital(capital)
+
+
 @app.route("/api/liquidacion/simular")
 @login_required
 def simular_liquidacion():
@@ -574,15 +604,17 @@ def liquidaciones():
     capitales = capitales_query.order_by(CapitalPrestamista.creado_en.desc()).all()
     resumenes = []
     for capital in capitales:
-        proyeccion = None
-        if capital.prestamo_cliente:
+        if not capital.prestamos:
+            resumenes.append({"capital": capital, "prestamo": None, "proyeccion": None})
+            continue
+        for prestamo_vinculado in capital.prestamos:
             proyeccion = calcular_distribucion_liquidacion(
-                capital.monto,
-                capital.prestamo_cliente.numero_cuotas,
+                prestamo_vinculado.monto,
+                prestamo_vinculado.numero_cuotas,
                 capital.tasa_admin,
-                capital.prestamo_cliente.interes_mensual,
+                prestamo_vinculado.interes_mensual,
             )
-        resumenes.append({"capital": capital, "proyeccion": proyeccion})
+            resumenes.append({"capital": capital, "prestamo": prestamo_vinculado, "proyeccion": proyeccion})
     compatibles = {}
     for cuota in cuotas:
         prestamo = cuota.prestamo
@@ -591,7 +623,7 @@ def liquidaciones():
                 capital for capital in capitales
                 if capital.prestamista_id == prestamo.deudor.usuario_id
                 and capital.estado == "disponible"
-                and abs(capital.monto - prestamo.monto) <= 0.01
+                and dinero(capital.saldo_pendiente or 0) + CENTAVO >= dinero(prestamo.monto)
                 and (not capital.plazo_meses or capital.plazo_meses == prestamo.numero_cuotas)
                 and capital.tasa_admin <= prestamo.interes_mensual
             ]
@@ -616,18 +648,18 @@ def vincular_capital_prestamo(prestamo_id):
         id=capital_id,
         prestamista_id=prestamo.deudor.usuario_id,
         estado="disponible",
-    ).first_or_404()
-    if abs(capital.monto - prestamo.monto) > 0.01 or (
+    ).with_for_update().first_or_404()
+    if dinero(capital.saldo_pendiente or 0) + CENTAVO < dinero(prestamo.monto) or (
         capital.plazo_meses and capital.plazo_meses != prestamo.numero_cuotas
     ):
-        flash("El monto y el plazo del capital no coinciden con el préstamo.", "error")
+        flash("El capital no tiene saldo o plazo compatible con el préstamo.", "error")
         return redirect(url_for("liquidaciones"))
     if capital.tasa_admin > prestamo.interes_mensual:
         flash("La tasa administrativa no puede superar la tasa del cliente.", "error")
         return redirect(url_for("liquidaciones"))
 
     prestamo.capital_prestamista_id = capital.id
-    capital.estado = "colocado"
+    asignar_capital_a_prestamo(capital, prestamo)
     db.session.commit()
     flash("Capital vinculado. Las cuotas pagadas ya están disponibles para liquidar.", "success")
     return redirect(url_for("liquidaciones"))
@@ -714,7 +746,7 @@ def transferir_prestamista():
 def anular_capital_prestamista(capital_id):
     capital = CapitalPrestamista.query.filter_by(id=capital_id).with_for_update().first_or_404()
     motivo = (request.form.get("motivo") or "Error al registrar la transferencia").strip()[:250]
-    if capital.estado != "disponible" or capital.prestamo_cliente or capital.liquidaciones:
+    if not capital.puede_anularse:
         flash("Este capital ya fue utilizado o liquidado y no puede anularse.", "error")
         return redirect(url_for("liquidaciones"))
 
@@ -900,15 +932,13 @@ def liquidar_cuota(cuota_id):
         cuota.ganancia_prestamista = ganancia_prestamista
         cuota.fecha_liquidacion = datetime.utcnow()
 
-        capital_admin.capital_liquidado = (capital_admin.capital_liquidado or 0) + datos_liquidacion["capital_mensual"]
-        capital_admin.interes_liquidado = (capital_admin.interes_liquidado or 0) + datos_liquidacion["interes_admin"]
-        capital_admin.saldo_pendiente = max(
-            (capital_admin.saldo_pendiente or 0) - datos_liquidacion["capital_mensual"],
-            0,
+        capital_admin.capital_liquidado = como_float(
+            dinero(capital_admin.capital_liquidado or 0) + dinero(datos_liquidacion["capital_mensual"])
         )
-        if capital_admin.saldo_pendiente <= 0.01:
-            capital_admin.saldo_pendiente = 0
-            capital_admin.estado = "liquidado"
+        capital_admin.interes_liquidado = como_float(
+            dinero(capital_admin.interes_liquidado or 0) + dinero(datos_liquidacion["interes_admin"])
+        )
+        _recalcular_estado_capital(capital_admin)
 
         db.session.add(LiquidacionCapital(
             cuota_id=cuota.id,
@@ -1381,7 +1411,7 @@ def eliminar_deudor(deudor_id):
 
     for prestamo in deudor.prestamos:
         if prestamo.capital_administrador:
-            prestamo.capital_administrador.estado = "disponible"
+            liberar_capital_de_prestamo(prestamo.capital_administrador, prestamo)
 
     db.session.delete(deudor)
     db.session.commit()
@@ -1444,8 +1474,8 @@ def nuevo_prestamo(deudor_id):
                 prestamista_id=propietario.id,
                 estado="disponible",
             ).with_for_update().first_or_404()
-            if abs(capital_admin.monto - monto) > 0.01:
-                flash("El préstamo al cliente debe usar el mismo capital entregado por el administrador.", "error")
+            if dinero(capital_admin.saldo_pendiente or 0) + CENTAVO < dinero(monto):
+                flash("El capital del administrador no tiene saldo suficiente para este préstamo.", "error")
                 return mostrar_formulario()
             if capital_admin.plazo_meses and capital_admin.plazo_meses != numero_cuotas:
                 flash("El número de cuotas debe coincidir con el plazo del capital del administrador.", "error")
@@ -1527,7 +1557,7 @@ def nuevo_prestamo(deudor_id):
         )
 
         if capital_admin:
-            capital_admin.estado = "colocado"
+            asignar_capital_a_prestamo(capital_admin, prestamo)
 
         db.session.add(prestamo)
         db.session.commit()
@@ -1918,8 +1948,9 @@ def editar_prestamo(prestamo_id):
 
         if prestamo.capital_administrador:
             capital_admin = prestamo.capital_administrador
-            if abs(monto_nuevo - capital_admin.monto) > 0.01 or numero_cuotas_nuevo != capital_admin.plazo_meses:
-                flash("Monto y plazo deben conservar el acuerdo de capital del administrador.", "error")
+            saldo_disponible_prestamo = dinero(capital_admin.saldo_pendiente or 0) + dinero(prestamo.monto)
+            if saldo_disponible_prestamo + CENTAVO < dinero(monto_nuevo) or numero_cuotas_nuevo != capital_admin.plazo_meses:
+                flash("El capital del administrador no tiene saldo suficiente o el plazo no coincide.", "error")
                 return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
             if interes_mensual < capital_admin.tasa_admin:
                 flash("La tasa del cliente no puede ser menor que la tasa del administrador.", "error")
@@ -1936,6 +1967,13 @@ def editar_prestamo(prestamo_id):
         prestamo.dia_pago = dia_pago
 
         if pagos_existentes == 0:
+            if prestamo.capital_administrador and monto_nuevo != prestamo.monto:
+                capital_admin = prestamo.capital_administrador
+                capital_admin.saldo_pendiente = como_float(
+                    dinero(capital_admin.saldo_pendiente or 0) + dinero(prestamo.monto) - dinero(monto_nuevo)
+                )
+                _recalcular_estado_capital(capital_admin)
+
             # Reconstruir cuotas desde cero
             prestamo.monto = monto_nuevo
             prestamo.numero_cuotas = numero_cuotas_nuevo
@@ -2179,7 +2217,7 @@ def eliminar_prestamo(prestamo_id):
         flash("No se puede eliminar un préstamo con pagos o movimientos contables. Conserva el historial financiero.", "error")
         return redirect(url_for("detalle_prestamo", prestamo_id=prestamo.id))
     if prestamo.capital_administrador:
-        prestamo.capital_administrador.estado = "disponible"
+        liberar_capital_de_prestamo(prestamo.capital_administrador, prestamo)
 
     db.session.delete(prestamo)
     db.session.commit()

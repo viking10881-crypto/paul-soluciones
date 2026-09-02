@@ -14,20 +14,23 @@
     <div class="table-card">
         <h2>Capitales administrador → prestamista</h2>
         <table>
-            <thead><tr><th>Prestamista</th><th>Capital inicial</th><th>Tasa admin</th><th>Tasa cliente</th><th>Margen prestamista</th><th>Total admin</th><th>Ganancia prestamista</th><th>Saldo capital</th><th>Estado</th><th>Acción</th></tr></thead>
+            <thead><tr><th>Prestamista</th><th>Deudor</th><th>Capital total</th><th>Monto préstamo</th><th>Tasa admin</th><th>Tasa cliente</th><th>Margen prestamista</th><th>Total admin</th><th>Ganancia prestamista</th><th>Disponible para asignar</th><th>Pendiente por liquidar</th><th>Estado</th><th>Acción</th></tr></thead>
             <tbody>{% for item in resumenes %}
                 <tr>
                     <td>{{ item.capital.prestamista.nombre }}</td>
+                    <td>{{ item.prestamo.deudor.nombre if item.prestamo else '—' }}</td>
                     <td>${{ "{:,.0f}".format(item.capital.monto) }}</td>
+                    <td>{{ "${:,.0f}".format(item.prestamo.monto) if item.prestamo else '—' }}</td>
                     <td>{{ item.capital.tasa_admin }}%</td>
                     <td>{% if item.proyeccion %}{{ item.proyeccion.tasa_cliente }}%{% else %}Pendiente de colocar{% endif %}</td>
                     <td>{% if item.proyeccion %}{{ item.proyeccion.tasa_prestamista }}%{% else %}—{% endif %}</td>
                     <td>{% if item.proyeccion %}${{ "{:,.0f}".format(item.proyeccion.total_admin_final) }}{% else %}—{% endif %}</td>
                     <td>{% if item.proyeccion %}${{ "{:,.0f}".format(item.proyeccion.ganancia_prestamista_total) }}{% else %}—{% endif %}</td>
                     <td>${{ "{:,.0f}".format(item.capital.saldo_pendiente) }}</td>
+                    <td>${{ "{:,.0f}".format(item.capital.pendiente_por_liquidar) }}</td>
                     <td>{{ item.capital.estado }}</td>
                     <td>
-                        {% if current_user.es_admin and item.capital.estado == 'disponible' %}
+                        {% if current_user.es_admin and item.capital.puede_anularse %}
                         <form method="POST" action="{{ url_for('anular_capital_prestamista', capital_id=item.capital.id) }}" onsubmit="return confirm('¿Anular este capital y devolver el dinero al administrador?')">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <input type="text" name="motivo" maxlength="250" placeholder="Motivo" required style="min-width:130px">
@@ -38,7 +41,7 @@
                         {% else %}—{% endif %}
                     </td>
                 </tr>
-            {% else %}<tr><td colspan="10">No hay capitales del administrador registrados.</td></tr>{% endfor %}</tbody>
+            {% else %}<tr><td colspan="13">No hay capitales del administrador registrados.</td></tr>{% endfor %}</tbody>
         </table>
     </div>
 
@@ -95,7 +98,7 @@
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <select name="capital_prestamista_id" required>
                                     {% for capital in opciones %}
-                                    <option value="{{ capital.id }}">${{ "{:,.0f}".format(capital.monto) }} · {{ capital.tasa_admin }}% · {{ capital.plazo_meses }} meses</option>
+                                    <option value="{{ capital.id }}">${{ "{:,.0f}".format(capital.saldo_pendiente) }} disponible · {{ capital.tasa_admin }}% · {{ capital.plazo_meses }} meses</option>
                                     {% endfor %}
                                 </select>
                                 <button type="submit" class="btn-small">Vincular capital</button>

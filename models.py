@@ -100,7 +100,7 @@ class Prestamo(db.Model):
 
     deudor_id = db.Column(db.Integer, db.ForeignKey("deudores.id"), nullable=False)
     cuenta_desembolso_id = db.Column(db.Integer, db.ForeignKey("cuentas_contables.id"), nullable=True)
-    capital_prestamista_id = db.Column(db.Integer, db.ForeignKey("capital_prestamista.id"), nullable=True, unique=True)
+    capital_prestamista_id = db.Column(db.Integer, db.ForeignKey("capital_prestamista.id"), nullable=True, index=True)
 
     monto = db.Column(Dinero(), nullable=False)
     interes_mensual = db.Column(db.Float, default=7.0)
@@ -227,7 +227,15 @@ class CapitalPrestamista(db.Model):
 
     prestamista = db.relationship("Usuario", backref="capital_prestamos", foreign_keys=[prestamista_id])
     anulado_por = db.relationship("Usuario", foreign_keys=[anulado_por_id])
-    prestamo_cliente = db.relationship("Prestamo", backref="capital_administrador", uselist=False)
+    prestamos = db.relationship("Prestamo", backref="capital_administrador")
+
+    @property
+    def pendiente_por_liquidar(self):
+        return max(float(self.monto or 0) - float(self.capital_liquidado or 0), 0)
+
+    @property
+    def puede_anularse(self):
+        return self.estado == "disponible" and not self.prestamos and not self.liquidaciones
 
 
 class LiquidacionCapital(db.Model):

@@ -69,10 +69,10 @@
                         <option value="">Selecciona un capital disponible</option>
                         {% for capital in capitales_admin %}
                         <option value="{{ capital.id }}"
-                                data-monto="{{ capital.monto }}"
+                                data-saldo="{{ capital.saldo_pendiente }}"
                                 data-plazo="{{ capital.plazo_meses or '' }}"
                                 data-tasa="{{ capital.tasa_admin }}">
-                            Admin: ${{ "{:,.0f}".format(capital.monto) }} · {{ capital.tasa_admin }}% · {{ capital.plazo_meses }} meses
+                            Admin: ${{ "{:,.0f}".format(capital.saldo_pendiente) }} disponible de ${{ "{:,.0f}".format(capital.monto) }} · {{ capital.tasa_admin }}% · {{ capital.plazo_meses }} meses
                         </option>
                         {% endfor %}
                     </select>
@@ -260,7 +260,10 @@ interesInput.addEventListener("input", calcularPreview);
 if (capitalAdminSelect) {
     capitalAdminSelect.addEventListener("change", () => {
         const opcion = capitalAdminSelect.options[capitalAdminSelect.selectedIndex];
-        if (opcion.dataset.monto) montoInput.value = opcion.dataset.monto;
+        if (opcion.dataset.saldo) {
+            montoInput.max = opcion.dataset.saldo;
+            montoInput.value = opcion.dataset.saldo;
+        }
         if (opcion.dataset.plazo) cuotasInput.value = opcion.dataset.plazo;
         calcularPreview();
         actualizarOrigen();

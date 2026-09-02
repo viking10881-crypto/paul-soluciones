@@ -2,7 +2,7 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 from app import app, db, obtener_cuentas_contables
-from models import Usuario, CuentaContable, CuentaMovimiento, CapitalPrestamista
+from models import Usuario, CuentaContable, CuentaMovimiento, CapitalPrestamista, Deudor, Prestamo
 
 
 @pytest.fixture
@@ -147,6 +147,59 @@ def test_anular_capital_reintegra_cuentas_y_conserva_historial(escenario):
         assert CuentaMovimiento.query.filter_by(
             capital_prestamista_id=capital_id, tipo="anulacion_capital"
         ).count() == 4
+
+
+def test_capital_se_reparte_entre_varios_prestamos(escenario):
+    client, (_, prestamista_id, _, _, banco_prestamista_id, _) = escenario
+    client.post("/login", data={"usuario": "admin", "password": "admin123456"})
+    client.post("/admin/transferir", data={
+        "prestamista_id": prestamista_id,
+        "monto_banco": 100_000,
+        "monto_caja_menor": 0,
+        "tasa_admin": 6,
+        "plazo": 5,
+    })
+    with app.app_context():
+        capital_id = CapitalPrestamista.query.one().id
+
+    client.post("/logout")
+    client.post("/login", data={"usuario": "prestamista", "password": "prestamista123"})
+
+    with app.app_context():
+        deudor_uno = Deudor(usuario_id=prestamista_id, nombre="Cliente uno")
+        deudor_dos = Deudor(usuario_id=prestamista_id, nombre="Cliente dos")
+        db.session.add_all([deudor_uno, deudor_dos])
+        db.session.commit()
+        deudor_uno_id, deudor_dos_id = deudor_uno.id, deudor_dos.id
+
+    datos_prestamo = {
+        "numero_cuotas": 5,
+        "dia_pago": 5,
+        "interes_mensual": 8,
+        "origen_capital": "administrador",
+        "capital_prestamista_id": capital_id,
+        "cuenta_desembolso": "banco",
+    }
+
+    respuesta_uno = client.post(f"/prestamo/nuevo/{deudor_uno_id}", data={**datos_prestamo, "monto": 60_000})
+    assert respuesta_uno.status_code == 302
+    with app.app_context():
+        capital = db.session.get(CapitalPrestamista, capital_id)
+        assert capital.saldo_pendiente == 40_000
+        assert capital.estado == "disponible"
+        assert db.session.get(CuentaContable, banco_prestamista_id).saldo == 40_000
+
+    respuesta_dos = client.post(f"/prestamo/nuevo/{deudor_dos_id}", data={**datos_prestamo, "monto": 40_000})
+    assert respuesta_dos.status_code == 302
+    with app.app_context():
+        capital = db.session.get(CapitalPrestamista, capital_id)
+        assert capital.saldo_pendiente == 0
+        assert capital.estado == "colocado"
+        assert db.session.get(CuentaContable, banco_prestamista_id).saldo == 0
+        prestamos = Prestamo.query.filter_by(capital_prestamista_id=capital_id).all()
+        assert len(prestamos) == 2
+        assert sorted(p.monto for p in prestamos) == [40_000, 60_000]
+        assert not capital.puede_anularse
 
 
 def test_anulacion_funciona_despues_de_mover_caja_a_banco(escenario):
